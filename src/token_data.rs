@@ -1,3 +1,6 @@
+use core::fmt;
+use core::fmt::Debug;
+
 use ascii::AsciiStr;
 
 use basc_macros::declare_token_data;
@@ -5,47 +8,83 @@ use basc_macros::declare_token_data;
 
 type ExpandBuf = arrayvec::ArrayVec<u8, 3>;
 
-#[derive(Debug)]
-pub(crate) struct TokenUnpacker<I, L> {
+pub(crate) struct TokenUnpacker<I>
+where I: Iterator, I::Item: IntoIterator<Item = u8> {
 	src: I,
-	last_line: Option<L>,
+	last_line: Option<<<I as Iterator>::Item as IntoIterator>::IntoIter>,
 	token_read: ascii::Chars<'static>, // remaining chars from a matched token
 	token_key_buf: ExpandBuf, // bytes that might form a token key
 	output_buf: ExpandBuf, // bytes that didn't actually form a token key
+	have_output_trailing_newline: bool, // trailing newline after we get None from src
 }
 
-impl<I, L> TokenUnpacker<I, L>
-where I: Iterator<Item = L>, L: Iterator<Item = u8> {
-	pub(crate) fn new(src: I) -> Self {
+impl<I> TokenUnpacker<I>
+where I: Iterator, I::Item: IntoIterator<Item = u8> + Debug {
+	pub(crate) fn new(mut src: I) -> Self {
+		let first_line = src.next().map(IntoIterator::into_iter);
+		let iter_was_empty = first_line.is_none();
 		Self {
 			src,
-			last_line: None,
+			last_line: first_line,
 			token_read: <&'static AsciiStr>::default().chars(),
 			token_key_buf: ExpandBuf::default(),
 			output_buf: ExpandBuf::default(),
+			// don't output 'final' nl if input was empty
+			have_output_trailing_newline: iter_was_empty,
 		}
 	}
 }
 
-impl<I, L> Iterator for TokenUnpacker<I, L>
-where I: Iterator<Item = L>, L: Iterator<Item = u8> {
+impl<I> Debug for TokenUnpacker<I>
+where I: Iterator, I::Item: IntoIterator<Item = u8> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.debug_struct("TokenUnpacker")
+			.field("of found token", &self.token_read.as_str())
+			.field("building lookup key", &&*self.token_key_buf)
+			.field("of output buffer", &&*self.output_buf)
+			.finish()
+	}
+}
+
+impl<I> Iterator for TokenUnpacker<I>
+where I: Iterator, I::Item: IntoIterator<Item = u8> + Debug {
 	type Item = u8;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		// check any existing tokens to be flushed out
-		if let Some(token_char) = self.token_read.next() {
-			return Some(token_char.as_byte());
-		}
-
-		// check for chars that we tried to turn into a token key but couldn't
-		if let non_key @ Some(_) = self.output_buf.pop_at(0) {
-			return non_key;
-		}
-
 		loop {
+			// check any existing tokens to be flushed out
+			if let Some(token_char) = self.token_read.next() {
+				return Some(token_char.as_byte());
+			}
+
+			// check for chars that we tried to turn into a token key but couldn't
+			if let non_key @ Some(_) = self.output_buf.pop_at(0) {
+				return non_key;
+			}
+
 			let line = match self.last_line {
 				Some(ref mut l) => l,
-				None => self.last_line.insert(self.src.next()?),
+				// if no line, we are returning a NL or nothing
+				None => {
+					// there may be incomplete tokens to flush
+					self.output_buf = core::mem::replace(&mut self.token_key_buf,
+						ExpandBuf::default());
+					if ! self.output_buf.is_empty() { continue; }
+
+					return match self.src.next().map(IntoIterator::into_iter) {
+						Some(l) => {
+							self.last_line = Some(l);
+							Some(b'\n')
+						},
+						None if self.have_output_trailing_newline => {
+							None // we are DONE
+						},
+						None => {
+							self.have_output_trailing_newline = true;
+							Some(b'\n')
+						}
+					};
+				}
 			};
 
 			let nc = match line.next() {
@@ -231,6 +270,58 @@ mod test_unpack {
 
 			assert_eq!(result, query_token(&mut av));
 		}
+	}
+
+	fn expand<const N: usize>(expected: &'static [u8], src: [&[u8]; N]) {
+		expand2(expected, &src[..])
+	}
+
+	fn expand2(expected: &'static [u8], src: &[&[u8]]) {
+		let expander = super::TokenUnpacker::new(src.iter().map(|i| i.iter().copied()));
+		assert_eq!(expected, &*expander.collect::<Vec<u8>>());
+	}
+
+	#[test]
+	fn expand_pure_ascii() {
+		expand(b"hello\n", [b"hello"]);
+	}
+
+	#[test]
+	fn expand_direct() {
+		expand(b"PRINT CHR$32\n", [b"\xf1 \xbd32"]);
+		expand(b"PRINTCHR$32\n", [b"\xf1\xbd32"]);
+	}
+
+	#[test]
+	fn expand_indirect() {
+		expand(b"SYS87\n", [b"\x8d\xc8\x1487"])
+	}
+
+	#[test]
+	fn multiline() {
+		expand(b"line 1\nline 2\n", [b"line 1", b"line 2"]);
+	}
+
+	#[test]
+	fn abandoned_indirects() {
+		expand(b"\x8d\n", [b"\x8d"]);
+		expand(b"\x8d\xc7\n\x8d\xc8\n", [b"\x8d\xc7", b"\x8d\xc8"])
+	}
+
+	#[test]
+	fn failed_direct() {
+		expand(b"\xc6\n", [b"\xc6"]);
+		expand(b"\xc7\n", [b"\xc7"]);
+		expand(b"\xc8\n", [b"\xc8"]);
+	}
+
+	#[test]
+	fn just_look_around_you() {
+		// TODO line number references don't work like this
+		expand(b"10 PRINT \"LOOK AROUND YOU \";\n20 GOTO 10\n", [
+			b"10 \xf1 \"LOOK AROUND YOU \";",
+			b"20 \xe5 10"
+		]);
 	}
 }
 
