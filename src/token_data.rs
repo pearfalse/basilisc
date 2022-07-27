@@ -122,6 +122,13 @@ where I: Iterator, I::Item: IntoIterator<Item = u8> + Debug {
 
 						return Some(b);
 					},
+					LookupResult::InterruptedIndirect(b) => {
+						// to push out is INDIRECT_PREFIX, b
+						self.output_buf.clear();
+						self.output_buf.push(b);
+
+						return Some(INDIRECT_PREFIX); // it was just a byte after all
+					}
 					LookupResult::IndirectFailure([a, b, c]) => {
 						// 3 bytes that aren't a token
 
@@ -150,6 +157,7 @@ enum LookupResult {
 	NotYet,
 	DirectFailure(u8),
 	IndirectFailure([u8; 3]),
+	InterruptedIndirect(u8),
 }
 
 fn query_token(src: &mut ExpandBuf) -> LookupResult {
@@ -178,6 +186,13 @@ fn query_token(src: &mut ExpandBuf) -> LookupResult {
 	};
 
 	match **src {
+		[INDIRECT_PREFIX, ind, INDIRECT_PREFIX] => {
+			// incomplete indirect token; consider this an interruption
+			src.clear();
+			src.push(INDIRECT_PREFIX);
+			LookupResult::InterruptedIndirect(ind)
+		},
+
 		// no match? okay, how many bytes should we remove?
 		[INDIRECT_PREFIX, ind, ind2] if (INDIRECT_C6..=INDIRECT_C8).contains(&ind) => {
 			// we formed an indirect lookup, but it didn't match anything
@@ -277,6 +292,7 @@ mod test_unpack {
 	}
 
 	fn expand2(expected: &'static [u8], src: &[&[u8]]) {
+		println!("\ncase: {:?}", expected);
 		let expander = super::TokenUnpacker::new(src.iter().map(|i| i.iter().copied()));
 		assert_eq!(expected, &*expander.collect::<Vec<u8>>());
 	}
@@ -313,6 +329,12 @@ mod test_unpack {
 		expand(b"\xc6\n", [b"\xc6"]);
 		expand(b"\xc7\n", [b"\xc7"]);
 		expand(b"\xc8\n", [b"\xc8"]);
+	}
+
+	#[test]
+	fn interrupt_indirect_with_another() {
+		expand(b"\x8dSUM\n", [b"\x8d\x8d\xc6\x03"]);
+		expand(b"\x8d\xc7SUM\n", [b"\x8d\xc7\x8d\xc6\x03"]);
 	}
 
 	#[test]
