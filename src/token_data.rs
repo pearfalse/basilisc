@@ -5,24 +5,173 @@ use basc_macros::declare_token_data;
 
 type ExpandBuf = arrayvec::ArrayVec<u8, 3>;
 
+#[derive(Debug)]
+pub(crate) struct TokenUnpacker<I, L> {
+	src: I,
+	last_line: Option<L>,
+	token_read: ascii::Chars<'static>, // remaining chars from a matched token
+	token_key_buf: ExpandBuf, // bytes that might form a token key
+	output_buf: ExpandBuf, // bytes that didn't actually form a token key
+}
+
+impl<I, L> TokenUnpacker<I, L>
+where I: Iterator<Item = L>, L: Iterator<Item = u8> {
+	pub(crate) fn new(src: I) -> Self {
+		Self {
+			src,
+			last_line: None,
+			token_read: <&'static AsciiStr>::default().chars(),
+			token_key_buf: ExpandBuf::default(),
+			output_buf: ExpandBuf::default(),
+		}
+	}
+}
+
+impl<I, L> Iterator for TokenUnpacker<I, L>
+where I: Iterator<Item = L>, L: Iterator<Item = u8> {
+	type Item = u8;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		// check any existing tokens to be flushed out
+		if let Some(token_char) = self.token_read.next() {
+			return Some(token_char.as_byte());
+		}
+
+		// check for chars that we tried to turn into a token key but couldn't
+		if let non_key @ Some(_) = self.output_buf.pop_at(0) {
+			return non_key;
+		}
+
+		loop {
+			let line = match self.last_line {
+				Some(ref mut l) => l,
+				None => self.last_line.insert(self.src.next()?),
+			};
+
+			let nc = match line.next() {
+				Some(c) => c,
+				None => {
+					self.last_line = None;
+					continue;
+				},
+			};
+
+			// it's a debug assert in theory, but other checks may occur later
+			assert!(self.output_buf.is_empty());
+			if let Ok(()) = self.token_key_buf.try_push(nc) {
+				// prevent use of token_key_buf in the match statements
+				let _guard = &mut self.token_key_buf;
+
+				// we may have a token here
+				match query_token(&mut self.token_key_buf) {
+					LookupResult::Direct(tok) => {
+						// 1-char token
+
+						// prepare matched token as future byte
+						self.token_read = tok.chars();
+						return Some(self.token_read.next().unwrap().as_byte());
+					},
+					LookupResult::Indirect(tok) => {
+						// 3-char token
+
+						// prepare matched token as future byte
+						self.token_read = tok.chars();
+						return Some(self.token_read.next().unwrap().as_byte());
+					},
+					LookupResult::DirectFailure(b) => {
+						// 1 byte confirmed not to be a token
+
+						return Some(b);
+					},
+					LookupResult::IndirectFailure([a, b, c]) => {
+						// 3 bytes that aren't a token
+
+						self.output_buf = (&[b, c][..]).try_into().unwrap();
+						return Some(a);
+					},
+					LookupResult::NotYet => continue,
+				};
+
+				#[allow(unreachable_code, path_statements)] {_guard;}
+			}
+		}
+
+	}
+}
+
 const INDIRECT_PREFIX: u8 = 0x8d;
 const INDIRECT_C6: u8 = 0xc6;
 const INDIRECT_C7: u8 = 0xc7;
 const INDIRECT_C8: u8 = 0xc8;
 
-fn query_token(src: &ExpandBuf) -> Option<&'static AsciiStr> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum LookupResult {
+	Direct(&'static AsciiStr),
+	Indirect(&'static AsciiStr),
+	NotYet,
+	DirectFailure(u8),
+	IndirectFailure([u8; 3]),
+}
+
+fn query_token(src: &mut ExpandBuf) -> LookupResult {
 	match src.get(0) {
 		Some(&INDIRECT_PREFIX) => {
-			let table2: &'static [Option<&'static AsciiStr>; 256] = match *src.get(1)? {
-				INDIRECT_C6 => &TOKEN_MAP_8D_C6,
-				INDIRECT_C7 => &TOKEN_MAP_8D_C7,
-				INDIRECT_C8 => &TOKEN_MAP_8D_C8,
-				_ => return None,
+			let table2 = match src.get(1) {
+				Some(&INDIRECT_C6) => Some(&TOKEN_MAP_8D_C6),
+				Some(&INDIRECT_C7) => Some(&TOKEN_MAP_8D_C7),
+				Some(&INDIRECT_C8) => Some(&TOKEN_MAP_8D_C8),
+				_ => None, // fall through to failure branch
 			};
-			table2[*src.get(2)? as usize]
+			if let Some(table2) = table2 {
+				if let Some(found) = src.get(2).and_then(|&idx| table2[idx as usize]) {
+					// indirect token matched; clear buffer
+					src.clear();
+					return LookupResult::Indirect(found);
+				}
+			}
 		},
-		Some(&b) => TOKEN_MAP_DIRECT[b as usize],
-		None => None,
+		Some(&b) => if let Some(found) = TOKEN_MAP_DIRECT[b as usize] {
+			// direct token matched; clear buffer
+			src.clear();
+			return LookupResult::Direct(found);
+		}
+		None => return LookupResult::NotYet,
+	};
+
+	match **src {
+		// no match? okay, how many bytes should we remove?
+		[INDIRECT_PREFIX, ind, ind2] if (INDIRECT_C6..=INDIRECT_C8).contains(&ind) => {
+			// we formed an indirect lookup, but it didn't match anything
+			src.clear();
+			LookupResult::IndirectFailure([INDIRECT_PREFIX, ind, ind2])
+		},
+
+		[INDIRECT_PREFIX, ind] if (INDIRECT_C6..=INDIRECT_C8).contains(&ind) => {
+			// this could be a successful indirect lookup, but it isn't yet. leave it alone
+			LookupResult::NotYet
+		},
+
+		[INDIRECT_PREFIX] => {
+			// this isn't finished yet either. go easy
+			LookupResult::NotYet
+		},
+
+		[INDIRECT_PREFIX, not_ind] => {
+			// the indirect prefix didn't form anything; pop it on its own
+			*src = ExpandBuf::default();
+			src.push(not_ind);
+			LookupResult::DirectFailure(INDIRECT_PREFIX)
+		},
+
+		[byte] => {
+			// turns out this was just a byte!
+			src.clear();
+			LookupResult::DirectFailure(byte)
+		},
+
+		_ => unreachable!(
+			"token lookup is >1 but not leading with indirect prefix!"),
+
 	}
 }
 
@@ -33,41 +182,54 @@ mod test_unpack {
 	#[test]
 	fn query_token_matches() {
 		let data = [
-			([0x80, 0x0d, 0x0d], "AND"),
-			([0x8a, 0x0d, 0x0d], "TAB("),
+			([0x80, 0x0d, 0x0d], LookupResult::Direct(
+				AsciiStr::from_ascii("AND").unwrap()
+			)),
+			([0x8a, 0x0d, 0x0d], LookupResult::Direct(
+				AsciiStr::from_ascii("TAB(").unwrap()
+			)),
 
-			([0x8d, 0xc6, 0x02], "BEAT"),
+			([0x8d, 0xc6, 0x02], LookupResult::Indirect(
+				AsciiStr::from_ascii("BEAT").unwrap()
+			)),
 
-			([0x8d, 0xc7, 0x16], "TEXTLOAD"),
-			([0x8d, 0xc7, 0x17], "SAVE"),
+			([0x8d, 0xc7, 0x16], LookupResult::Indirect(
+				AsciiStr::from_ascii("TEXTLOAD").unwrap()
+			)),
+			([0x8d, 0xc7, 0x17], LookupResult::Indirect(
+				AsciiStr::from_ascii("SAVE").unwrap()
+			)),
 		];
 
-		for (bytes, word) in data.into_iter() {
+		for (bytes, result) in data.into_iter() {
 			let mut av = ExpandBuf::default();
 			for b in bytes.into_iter().take_while(|b| *b != 0x0d) {
 				av.push(b);
 			}
+			println!("{:?}", av);
 
-			assert_eq!(Some(word), query_token(&av).map(AsciiStr::as_str));
+			assert_eq!(result, query_token(&mut av));
+			assert!(av.is_empty());
 		}
 	}
 
 	#[test]
 	fn query_token_no_match() {
 		let data = [
-			[0x20, 0x0d, 0x0d], // ASCII char
-			[0xc6, 0x02, 0x0d], // no prefix
-			[0x8d, 0xc6, 0xff], // nothing in this slot
-			[0x8d, 0x21, 0x0d], // sequence did not complete
-			[0x8d, 0x8d, 0xc6], // not correct as-is
+			([0x20, 0x0d, 0x0d], LookupResult::DirectFailure(0x20)), // ASCII char
+			([0xc6, 0x0d, 0x0d], LookupResult::DirectFailure(0xc6)), // no prefix
+			([0x8d, 0xc6, 0xff], LookupResult::IndirectFailure([0x8d, 0xc6, 0xff])), // not a token
+			([0x8d, 0xc6, 0x0d], LookupResult::NotYet), // sequence did not complete
+			([0x8d, 0x40, 0x0d], LookupResult::DirectFailure(0x8d)), // not a fully formed prefix
 		];
-		for bytes in data.into_iter() {
+		for (bytes, result) in data.into_iter() {
 			let mut av = ExpandBuf::default();
 			for b in bytes.into_iter().take_while(|b| *b != 0x0d) {
 				av.push(b);
 			}
+			println!("{:?}", av);
 
-			assert_eq!(None, query_token(&av));
+			assert_eq!(result, query_token(&mut av));
 		}
 	}
 }
