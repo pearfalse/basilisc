@@ -107,11 +107,16 @@ fn is_direct_token(input: &ParseStream, enforce_high_bit: bool)
 		let (int, _) = parse_basic_token_defn(int, enforce_high_bit)?;
 		let _ = input.parse::<syn::Token![=>]>()?;
 		let expanded = input.parse::<LitStr>()?;
+		let exp_str = expanded.value();
+		if exp_str.is_empty() {
+			// emptuy string = no
+			return Err(Error::new(expanded.span(), "expanded definition cannot be empty"));
+		}
 		if ! input.is_empty() {
 			// parse trailing comma too
 			let _ = input.parse::<syn::Token![,]>()?;
 		}
-		Ok(Some(( int, expanded.value(), expanded.span() )))
+		Ok(Some(( int, exp_str, expanded.span() )))
 	} else {
 		Ok(None)
 	}

@@ -33,6 +33,18 @@ where I: Iterator, I::Item: IntoIterator<Item = u8> + Debug {
 			have_output_trailing_newline: iter_was_empty,
 		}
 	}
+
+	fn read_new_expansion(&mut self, tok: &'static AsciiStr) -> u8 {
+		self.token_read = tok.chars();
+		match self.token_read.next() {
+			Some(ch) => ch,
+			None => unsafe {
+				// SAFETY: the AsciiStr in `tok` is sourced from proc macro `declare_token_data`,
+				// which disallows empty strings at compile time
+				core::hint::unreachable_unchecked()
+			}
+		}.as_byte()
+	}
 }
 
 impl<I> Debug for TokenUnpacker<I>
@@ -107,15 +119,13 @@ where I: Iterator, I::Item: IntoIterator<Item = u8> + Debug {
 						// 1-char token
 
 						// prepare matched token as future byte
-						self.token_read = tok.chars();
-						return Some(self.token_read.next().unwrap().as_byte());
+						return Some(self.read_new_expansion(tok));
 					},
 					LookupResult::Indirect(tok) => {
 						// 3-char token
 
 						// prepare matched token as future byte
-						self.token_read = tok.chars();
-						return Some(self.token_read.next().unwrap().as_byte());
+						return Some(self.read_new_expansion(tok));
 					},
 					LookupResult::DirectFailure(b) => {
 						// 1 byte confirmed not to be a token
