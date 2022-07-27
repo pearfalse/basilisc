@@ -1,0 +1,13 @@
+[package]
+name = "basc"
+version = "0.1.0"
+edition = "2021"
+authors = ["Simon Harris <simon@pearfalse.com>"]
+
+[workspace]
+resolver = "2"
+members = ["crates/basc-macros"]
+
+[dependencies]
+gumdrop = "0.8"
+basc-macros = { path = "crates/basc-macros", version = "*" }
