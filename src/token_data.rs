@@ -130,3 +130,36 @@ declare_token_data! {
 		0xc7 => "BEATS",
 	}
 }
+
+#[cfg(test)]
+mod test_proc_macro_output {
+	use super::{TOKEN_MAP_DIRECT, TOKEN_MAP_8D_C6, TOKEN_MAP_8D_C7, TOKEN_MAP_8D_C8};
+	use ascii::AsciiStr;
+
+	#[test]
+	fn test_direct() {
+		let data = [
+			(0x80u8, "AND"),
+			(0x8cu8, "THEN"),
+			(0xc5u8, "EOF"),
+		];
+		for (byte, word) in data.into_iter() {
+			assert_eq!(Some(word), TOKEN_MAP_DIRECT[byte as usize].map(AsciiStr::as_str));
+		}
+	}
+
+	#[test]
+	fn test_indirect() {
+		let data = [
+			(&TOKEN_MAP_8D_C6, 0x02u8, "BEAT"),
+			(&TOKEN_MAP_8D_C6, 0x03u8, "SUM"),
+			(&TOKEN_MAP_8D_C7, 0x03u8, "APPEND"),
+			(&TOKEN_MAP_8D_C7, 0x1cu8, "DELETE"),
+			(&TOKEN_MAP_8D_C8, 0x03u8, "CASE"),
+			(&TOKEN_MAP_8D_C8, 0x14u8, "SYS"),
+		];
+		for (arr, byte, word) in data.into_iter() {
+			assert_eq!(Some(word), arr[byte as usize].map(AsciiStr::as_str));
+		}
+	}
+}

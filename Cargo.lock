@@ -12,6 +12,7 @@ checksum = "bbf56136a5198c7b01a49e3afcbef6cf84597273d298f54432926024107b0109"
 name = "basc"
 version = "0.1.0"
 dependencies = [
+ "ascii",
  "basc-macros",
  "gumdrop",
 ]
