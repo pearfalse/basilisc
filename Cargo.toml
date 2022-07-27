@@ -11,4 +11,5 @@ members = ["crates/basc-macros"]
 [dependencies]
 gumdrop = "0.8"
 ascii = "1.0"
+arrayvec = "0.7.2"
 basc-macros = { path = "crates/basc-macros", version = "*" }

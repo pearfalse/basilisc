@@ -1,4 +1,76 @@
+use ascii::AsciiStr;
+
 use basc_macros::declare_token_data;
+
+
+type ExpandBuf = arrayvec::ArrayVec<u8, 3>;
+
+const INDIRECT_PREFIX: u8 = 0x8d;
+const INDIRECT_C6: u8 = 0xc6;
+const INDIRECT_C7: u8 = 0xc7;
+const INDIRECT_C8: u8 = 0xc8;
+
+fn query_token(src: &ExpandBuf) -> Option<&'static AsciiStr> {
+	match src.get(0) {
+		Some(&INDIRECT_PREFIX) => {
+			let table2: &'static [Option<&'static AsciiStr>; 256] = match *src.get(1)? {
+				INDIRECT_C6 => &TOKEN_MAP_8D_C6,
+				INDIRECT_C7 => &TOKEN_MAP_8D_C7,
+				INDIRECT_C8 => &TOKEN_MAP_8D_C8,
+				_ => return None,
+			};
+			table2[*src.get(2)? as usize]
+		},
+		Some(&b) => TOKEN_MAP_DIRECT[b as usize],
+		None => None,
+	}
+}
+
+#[cfg(test)]
+mod test_unpack {
+	use super::*;
+
+	#[test]
+	fn query_token_matches() {
+		let data = [
+			([0x80, 0x0d, 0x0d], "AND"),
+			([0x8a, 0x0d, 0x0d], "TAB("),
+
+			([0x8d, 0xc6, 0x02], "BEAT"),
+
+			([0x8d, 0xc7, 0x16], "TEXTLOAD"),
+			([0x8d, 0xc7, 0x17], "SAVE"),
+		];
+
+		for (bytes, word) in data.into_iter() {
+			let mut av = ExpandBuf::default();
+			for b in bytes.into_iter().take_while(|b| *b != 0x0d) {
+				av.push(b);
+			}
+
+			assert_eq!(Some(word), query_token(&av).map(AsciiStr::as_str));
+		}
+	}
+
+	#[test]
+	fn query_token_no_match() {
+		let data = [
+			[0x20, 0x0d, 0x0d], // ASCII char
+			[0xc6, 0x02, 0x0d], // no prefix
+			[0x8d, 0xc6, 0xff], // nothing in this slot
+			[0x8d, 0x21, 0x0d], // sequence did not complete
+			[0x8d, 0x8d, 0xc6], // not correct as-is
+		];
+		for bytes in data.into_iter() {
+			let mut av = ExpandBuf::default();
+			for b in bytes.into_iter().take_while(|b| *b != 0x0d) {
+				av.push(b);
+			}
+
+			assert_eq!(None, query_token(&av));
+		}
+	}
+}
 
 declare_token_data! {
 	// non-prefixed ones first
@@ -146,6 +218,7 @@ mod test_proc_macro_output {
 		for (byte, word) in data.into_iter() {
 			assert_eq!(Some(word), TOKEN_MAP_DIRECT[byte as usize].map(AsciiStr::as_str));
 		}
+		assert_eq!(None, TOKEN_MAP_DIRECT[0x8d]);
 	}
 
 	#[test]
