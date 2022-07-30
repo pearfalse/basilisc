@@ -326,6 +326,7 @@ mod test_unpack {
 	#[test]
 	fn multiline() {
 		expand(b"line 1\nline 2\n", [b"line 1", b"line 2"]);
+		expand(b"", []);
 	}
 
 	#[test]
