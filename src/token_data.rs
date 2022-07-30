@@ -577,4 +577,18 @@ mod test_proc_macro_output {
 			assert_eq!(Some(word), arr[byte as usize].map(AsciiStr::as_str));
 		}
 	}
+
+	#[test]
+	fn proof_we_disallowed_empty_strings() {
+		fn all_str_lengths(table: &'static [Option<&'static AsciiStr>; 256])
+			-> impl Iterator<Item = usize> {
+				table.iter().filter_map(Option::as_deref).map(AsciiStr::len)
+			}
+
+		assert!(all_str_lengths(&TOKEN_MAP_DIRECT)
+			.chain(all_str_lengths(&TOKEN_MAP_8D_C6))
+			.chain(all_str_lengths(&TOKEN_MAP_8D_C7))
+			.chain(all_str_lengths(&TOKEN_MAP_8D_C8))
+			.all(|sl| sl > 0));
+	}
 }
