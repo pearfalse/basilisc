@@ -1,6 +1,7 @@
 use gumdrop::Options;
 
 mod token_data;
+mod line_numbers;
 
 #[derive(Debug, Options)]
 enum Command {

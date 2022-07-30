@@ -3,6 +3,9 @@
 	[
 		{
 			"path": "."
+		},
+		{
+			"path": "/Users/simon/code/acorn-rust/scratch"
 		}
 	]
 }
