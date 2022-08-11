@@ -22,7 +22,7 @@ pub(crate) struct TokenUnpacker<I> {
 	in_string_literal: InStringLiteral, // are we in a string literal right now?
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InStringLiteral {
 	No,
 	Yes,
@@ -41,6 +41,9 @@ where I: Iterator<Item = u8> + Debug {
 			in_string_literal: InStringLiteral::No,
 		}
 	}
+
+	#[inline(always)]
+	fn should_decode_tokens(&self) -> bool { self.in_string_literal == InStringLiteral::No }
 
 	fn read_new_expansion(&mut self, tok: &'static AsciiStr) -> u8 {
 		self.token_read = tok.chars();
@@ -89,6 +92,22 @@ where I: Iterator<Item = u8> + Debug {
 						// there was something on the input, so care about trailing newlines
 						self.have_output_trailing_newline = Some(false);
 					}
+
+					if c == b'"' {
+						// update whether we're in a string literal
+						self.in_string_literal = match self.in_string_literal {
+							// this quote mark opens it
+							InStringLiteral::No => InStringLiteral::Yes,
+							// this closes it, or is half of an escaped `"`
+							InStringLiteral::Yes => InStringLiteral::MaybeJustClosed,
+							// this was an escape, we're still in it
+							InStringLiteral::MaybeJustClosed => InStringLiteral::Yes,
+						};
+					} else if self.in_string_literal == InStringLiteral::MaybeJustClosed {
+						// previous `"` wasn't an escape, we really are closed noe
+						self.in_string_literal = InStringLiteral::No;
+					}
+
 					c
 				},
 				None => {
@@ -107,7 +126,9 @@ where I: Iterator<Item = u8> + Debug {
 			// it's a debug assert in theory, but other unskippable bounds checks occur later
 			// so we try to combine them
 			assert!(self.output_buf.is_empty());
-			if let Ok(()) = self.token_key_buf.try_push(nc) {
+
+			if self.should_decode_tokens() {
+				self.token_key_buf.push(nc);
 				// we may have a token here
 				match query_token(&mut self.token_key_buf) {
 					LookupResult::Direct(tok) => {
@@ -141,8 +162,8 @@ where I: Iterator<Item = u8> + Debug {
 						return Some(a);
 					},
 					LookupResult::NotYet => continue,
-				};
-			}
+				}
+			} else { return Some(nc); }
 		})();
 
 		unclean.map(|c| match c {
@@ -353,6 +374,21 @@ mod test_unpack {
 		// TODO line number references don't work like this
 		expand("10 PRINT \"LOOK AROUND YOU \";\n20 GOTO 10\n",
 				b"10 \xf1 \"LOOK AROUND YOU \";\r20 \xe5 10");
+	}
+
+	#[test]
+	fn string_literals() {
+		// basic case
+		expand("\"test\"\n", b"\"test\"");
+		// escaped literal quote
+		expand("\"A\"\"B\"\"\"\"C\"\n", b"\"A\"\"B\"\"\"\"C\"");
+		// unterminated literal handled realtively gracefully
+		expand("PRINT \"unclosed\nEND\n", b"\xf1 \"unclosed\r\xe0");
+	}
+
+	#[test]
+	fn no_decode_in_string_literals() {
+		expand("LOAD \"™Ç\u{2418}\"\n", b"\x8d\xc7\x18 \"\x8d\xc7\x18\"")
 	}
 }
 
