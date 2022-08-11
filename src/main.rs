@@ -2,6 +2,7 @@ use gumdrop::Options;
 
 mod token_data;
 mod line_numbers;
+mod latin1;
 
 #[derive(Debug, Options)]
 enum Command {

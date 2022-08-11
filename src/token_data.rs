@@ -8,6 +8,10 @@ use basc_macros::declare_token_data;
 
 type ExpandBuf = arrayvec::ArrayVec<u8, 3>;
 
+/// Iterator adapter to detokenise a BASIC file.
+///
+/// This struct encapsulates a stream of bytes, decoding line numbers and expanding keyword tokens. It outputs Unix newlines (`\n`) and converts Latin-1 non-ASCII bytes in strings to their Unicode equivalents. Control codes in strings are replaced with printable equivalents where possible.
+// TODO flatten input iterator, this doesn't need to be per-line if it knows about line numbers
 pub(crate) struct TokenUnpacker<I>
 where I: Iterator, I::Item: IntoIterator<Item = u8> {
 	src: I,

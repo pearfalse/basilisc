@@ -1,3 +1,25 @@
+//! Handle line number encoding in RISC OS tokenised BASIC files.
+//!
+//! RISC OS' BASIC module adds a new file format, different from the one used on the BBC Micro. This new format has a different encoding for line numbers, which seems to have been done for two reasons:
+//!
+//! - Allow the use of larger line numbers. BASIC on the BBC Micro caps line numbers at 32767 (0x7fff), whereas RISC OS BASIC files can go up to 65279 (0xfeff).
+//! - Ensure that RISC OS BASIC files are always unreadable by tools that only understand the BBC Micro format, presumably to protect against encoded tokens being destroyed.
+//!
+//! The new line number format consists of three bytes that encode an 18-bit number. The format appears to be more futureproofed than the BASIC interpreter will actually allow; it is unknown what bits 16 and 17 could represent. The extra redundancy in this encoding is used in Acorn-generated BASIC files (from BASIC's `SAVE`, and !Edit's BASIC file support) to keep all three bytes in the numeric range of printable ASCII characters.
+//!
+//! This encoded line number form appears at the start of each line, as well as to encode the targets of `GOTO` and `GOSUB` statements.
+//!
+//! Given three source bytes `A` `B` `C`, and a final line number `F`, the decoding process looks like this:
+//!
+//! • initialise `F` to `0x4040`;
+//! • xor F[15->14] with A[3->2];
+//! • xor F[13->8] with C[5->0];
+//! • xor F[7->6] with A[5->4];
+//! • xor F[5->0] with B[5->0].
+//!
+//! The encoding process is the direct inverse of this, although for full correctness, any final bytes between `0x00` and `0x3e` should be OR'd with `0x40`.
+//!
+
 use thiserror::Error;
 
 pub type Encoded = [u8; 3];
