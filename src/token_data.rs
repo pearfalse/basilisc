@@ -4,6 +4,7 @@ use core::fmt::Debug;
 use ascii::AsciiStr;
 
 use basc_macros::declare_token_data;
+use super::latin1::*;
 
 
 type ExpandBuf = arrayvec::ArrayVec<u8, 3>;
@@ -18,6 +19,14 @@ pub(crate) struct TokenUnpacker<I> {
 	token_key_buf: ExpandBuf, // bytes that might form a token key
 	output_buf: ExpandBuf, // bytes that didn't actually form a token key
 	have_output_trailing_newline: Option<bool>, // trailing newline after we get None from src
+	in_string_literal: InStringLiteral, // are we in a string literal right now?
+}
+
+#[derive(Debug)]
+enum InStringLiteral {
+	No,
+	Yes,
+	MaybeJustClosed,
 }
 
 impl<I> TokenUnpacker<I>
@@ -29,6 +38,7 @@ where I: Iterator<Item = u8> + Debug {
 			token_key_buf: ExpandBuf::default(),
 			output_buf: ExpandBuf::default(),
 			have_output_trailing_newline: None,
+			in_string_literal: InStringLiteral::No,
 		}
 	}
 
@@ -59,10 +69,10 @@ where I: Iterator<Item = u8> {
 
 impl<I> Iterator for TokenUnpacker<I>
 where I: Iterator<Item = u8> + Debug {
-	type Item = u8;
+	type Item = char;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		loop {
+		let unclean = (|| loop {
 			// check any existing tokens to be flushed out
 			if let Some(token_char) = self.token_read.next() {
 				return Some(token_char.as_byte());
@@ -79,10 +89,7 @@ where I: Iterator<Item = u8> + Debug {
 						// there was something on the input, so care about trailing newlines
 						self.have_output_trailing_newline = Some(false);
 					}
-					match c {
-						b'\r' => b'\n',
-						_ => c,
-					}
+					c
 				},
 				None => {
 					// there may be incomplete tokens to flush
@@ -91,7 +98,7 @@ where I: Iterator<Item = u8> + Debug {
 					if ! self.output_buf.is_empty() { continue; }
 					if self.have_output_trailing_newline == Some(false) {
 						self.have_output_trailing_newline = Some(true);
-						return Some(b'\n');
+						return Some(b'\r'); // use \r here to bypass ^I expansion later
 					}
 					return None;
 				},
@@ -136,8 +143,19 @@ where I: Iterator<Item = u8> + Debug {
 					LookupResult::NotYet => continue,
 				};
 			}
-		}
+		})();
 
+		unclean.map(|c| match c {
+			// output unix newlines
+			b'\r' => {
+				// string literals never wrap lines
+				self.in_string_literal = InStringLiteral::No;
+				'\n'
+			},
+
+			// then convert from latin-1
+			_ => c.from_risc_os_latin1(),
+		})
 	}
 }
 
@@ -283,57 +301,57 @@ mod test_unpack {
 		}
 	}
 
-	fn expand(expected: &'static [u8], src: &[u8]) {
+	fn expand(expected: &'static str, src: &[u8]) {
 		println!("\ncase: {:?}", expected);
 		let expander = super::TokenUnpacker::new(src.iter().copied());
-		assert_eq!(expected, &*expander.collect::<Vec<u8>>());
+		assert_eq!(expected, &*expander.collect::<String>());
 	}
 
 	#[test]
 	fn expand_pure_ascii() {
-		expand(b"hello\n", b"hello");
+		expand("hello\n", b"hello");
 	}
 
 	#[test]
 	fn expand_direct() {
-		expand(b"PRINT CHR$32\n", b"\xf1 \xbd32");
-		expand(b"PRINTCHR$32\n", b"\xf1\xbd32");
+		expand("PRINT CHR$32\n", b"\xf1 \xbd32");
+		expand("PRINTCHR$32\n", b"\xf1\xbd32");
 	}
 
 	#[test]
 	fn expand_indirect() {
-		expand(b"SYS87\n", b"\x8d\xc8\x1487")
+		expand("SYS87\n", b"\x8d\xc8\x1487")
 	}
 
 	#[test]
 	fn multiline() {
-		expand(b"line 1\nline 2\n", b"line 1\rline 2");
-		expand(b"", b"");
+		expand("line 1\nline 2\n", b"line 1\rline 2");
+		expand("", b"");
 	}
 
 	#[test]
 	fn abandoned_indirects() {
-		expand(b"\x8d\n", b"\x8d");
-		expand(b"\x8d\xc7\n\x8d\xc8\n", b"\x8d\xc7\r\x8d\xc8")
+		expand("™\n", b"\x8d");
+		expand("™Ç\n™È\n", b"\x8d\xc7\r\x8d\xc8")
 	}
 
 	#[test]
 	fn failed_direct() {
-		expand(b"\xc6\n", b"\xc6");
-		expand(b"\xc7\n", b"\xc7");
-		expand(b"\xc8\n", b"\xc8");
+		expand("Æ\n", b"\xc6");
+		expand("Ç\n", b"\xc7");
+		expand("È\n", b"\xc8");
 	}
 
 	#[test]
 	fn interrupt_indirect_with_another() {
-		expand(b"\x8dSUM\n", b"\x8d\x8d\xc6\x03");
-		expand(b"\x8d\xc7SUM\n", b"\x8d\xc7\x8d\xc6\x03");
+		expand("™SUM\n", b"\x8d\x8d\xc6\x03");
+		expand("™ÇSUM\n", b"\x8d\xc7\x8d\xc6\x03");
 	}
 
 	#[test]
 	fn just_look_around_you() {
 		// TODO line number references don't work like this
-		expand(b"10 PRINT \"LOOK AROUND YOU \";\n20 GOTO 10\n",
+		expand("10 PRINT \"LOOK AROUND YOU \";\n20 GOTO 10\n",
 				b"10 \xf1 \"LOOK AROUND YOU \";\r20 \xe5 10");
 	}
 }

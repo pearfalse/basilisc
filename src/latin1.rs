@@ -1,5 +1,7 @@
 //! Maps from RISC OS' Latin-1 code page to and from matching printable Unicode characters.
 
+use sealed::sealed;
+
 /// A map from RISC OS Latin-1 to Unicode. Each index of this array corresponds to the Latin-1 byte, and the character at that position to its Unicode equivalent.
 ///
 /// C0 control codes, while preserved in Unicode, are replaced with printable equivalents in the _Control Pictures_ block.
@@ -36,43 +38,40 @@ static LATIN1_MAP: [char; 256] = [
 	'ð', 'ñ', 'ò', 'ó', 'ô', 'õ', 'ö', '÷', 'ø', 'ù', 'ú', 'û', 'ü', 'ý', 'þ', 'ÿ',
 ];
 
-pub(crate) mod ext {
-	use sealed::sealed;
+#[sealed]
+pub(crate) trait CharExt {
+	fn as_risc_os_latin1(self) -> Option<u8>;
+}
 
-	#[sealed]
-	pub(crate) trait CharExt {
-		fn as_risc_os_latin1(self) -> Option<u8>;
-	}
-
-	#[sealed]
-	impl CharExt for char {
-		fn as_risc_os_latin1(self) -> Option<u8> {
-			super::LATIN1_MAP.iter().position(|&l| l == self).map(|idx| idx as u8)
-		}
-	}
-
-
-	#[sealed]
-	pub(crate) trait ByteExt {
-		fn to_risc_os_latin1(self) -> char;
-	}
-
-	#[sealed]
-	impl ByteExt for u8 {
-		fn to_risc_os_latin1(self) -> char {
-			super::LATIN1_MAP[self as usize]
-		}
+#[sealed]
+impl CharExt for char {
+	fn as_risc_os_latin1(self) -> Option<u8> {
+		LATIN1_MAP.iter().position(|&l| l == self).map(|idx| idx as u8)
 	}
 }
 
+
+#[sealed]
+pub(crate) trait ByteExt {
+	fn from_risc_os_latin1(self) -> char;
+}
+
+#[sealed]
+impl ByteExt for u8 {
+	fn from_risc_os_latin1(self) -> char {
+		LATIN1_MAP[self as usize]
+	}
+}
+
+
 #[cfg(test)]
 mod tests {
-	use super::ext::*;
+	use super::*;
 
 	#[test]
 	fn to_unicode() {
-		assert_eq!('€', 0x80.to_risc_os_latin1());
-		assert_eq!('\u{2400}', 0x00.to_risc_os_latin1());
+		assert_eq!('€', 0x80.from_risc_os_latin1());
+		assert_eq!('\u{2400}', 0x00.from_risc_os_latin1());
 	}
 
 	#[test]
