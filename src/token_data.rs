@@ -11,30 +11,24 @@ type ExpandBuf = arrayvec::ArrayVec<u8, 3>;
 /// Iterator adapter to detokenise a BASIC file.
 ///
 /// This struct encapsulates a stream of bytes, decoding line numbers and expanding keyword tokens. It outputs Unix newlines (`\n`) and converts Latin-1 non-ASCII bytes in strings to their Unicode equivalents. Control codes in strings are replaced with printable equivalents where possible.
-// TODO flatten input iterator, this doesn't need to be per-line if it knows about line numbers
-pub(crate) struct TokenUnpacker<I>
-where I: Iterator, I::Item: IntoIterator<Item = u8> {
+// TODO line numbers and string cleanups
+pub(crate) struct TokenUnpacker<I> {
 	src: I,
-	last_line: Option<<<I as Iterator>::Item as IntoIterator>::IntoIter>,
 	token_read: ascii::Chars<'static>, // remaining chars from a matched token
 	token_key_buf: ExpandBuf, // bytes that might form a token key
 	output_buf: ExpandBuf, // bytes that didn't actually form a token key
-	have_output_trailing_newline: bool, // trailing newline after we get None from src
+	have_output_trailing_newline: Option<bool>, // trailing newline after we get None from src
 }
 
 impl<I> TokenUnpacker<I>
-where I: Iterator, I::Item: IntoIterator<Item = u8> + Debug {
-	pub(crate) fn new(mut src: I) -> Self {
-		let first_line = src.next().map(IntoIterator::into_iter);
-		let iter_was_empty = first_line.is_none();
+where I: Iterator<Item = u8> + Debug {
+	pub(crate) fn new(src: I) -> Self {
 		Self {
 			src,
-			last_line: first_line,
 			token_read: <&'static AsciiStr>::default().chars(),
 			token_key_buf: ExpandBuf::default(),
 			output_buf: ExpandBuf::default(),
-			// don't output 'final' nl if input was empty
-			have_output_trailing_newline: iter_was_empty,
+			have_output_trailing_newline: None,
 		}
 	}
 
@@ -43,6 +37,7 @@ where I: Iterator, I::Item: IntoIterator<Item = u8> + Debug {
 		match self.token_read.next() {
 			Some(ch) => ch,
 			None => unsafe {
+				debug_assert!(false, "declare_token_data map contains an empty string");
 				// SAFETY: the AsciiStr in `tok` is sourced from proc macro `declare_token_data`,
 				// which disallows empty strings at compile time
 				core::hint::unreachable_unchecked()
@@ -52,7 +47,7 @@ where I: Iterator, I::Item: IntoIterator<Item = u8> + Debug {
 }
 
 impl<I> Debug for TokenUnpacker<I>
-where I: Iterator, I::Item: IntoIterator<Item = u8> {
+where I: Iterator<Item = u8> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("TokenUnpacker")
 			.field("of found token", &self.token_read.as_str())
@@ -63,7 +58,7 @@ where I: Iterator, I::Item: IntoIterator<Item = u8> {
 }
 
 impl<I> Iterator for TokenUnpacker<I>
-where I: Iterator, I::Item: IntoIterator<Item = u8> + Debug {
+where I: Iterator<Item = u8> + Debug {
 	type Item = u8;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -78,45 +73,34 @@ where I: Iterator, I::Item: IntoIterator<Item = u8> + Debug {
 				return non_key;
 			}
 
-			let line = match self.last_line {
-				Some(ref mut l) => l,
-				// if no line, we are returning a NL or nothing
+			let nc = match self.src.next() {
+				Some(c) => {
+					if self.have_output_trailing_newline.is_none() {
+						// there was something on the input, so care about trailing newlines
+						self.have_output_trailing_newline = Some(false);
+					}
+					match c {
+						b'\r' => b'\n',
+						_ => c,
+					}
+				},
 				None => {
 					// there may be incomplete tokens to flush
 					self.output_buf = core::mem::replace(&mut self.token_key_buf,
 						ExpandBuf::default());
 					if ! self.output_buf.is_empty() { continue; }
-
-					return match self.src.next().map(IntoIterator::into_iter) {
-						Some(l) => {
-							self.last_line = Some(l);
-							Some(b'\n')
-						},
-						None if self.have_output_trailing_newline => {
-							None // we are DONE
-						},
-						None => {
-							self.have_output_trailing_newline = true;
-							Some(b'\n')
-						}
-					};
-				}
-			};
-
-			let nc = match line.next() {
-				Some(c) => c,
-				None => {
-					self.last_line = None;
-					continue;
+					if self.have_output_trailing_newline == Some(false) {
+						self.have_output_trailing_newline = Some(true);
+						return Some(b'\n');
+					}
+					return None;
 				},
 			};
 
-			// it's a debug assert in theory, but other checks may occur later
+			// it's a debug assert in theory, but other unskippable bounds checks occur later
+			// so we try to combine them
 			assert!(self.output_buf.is_empty());
 			if let Ok(()) = self.token_key_buf.try_push(nc) {
-				// prevent use of token_key_buf in the match statements
-				let _guard = &mut self.token_key_buf;
-
 				// we may have a token here
 				match query_token(&mut self.token_key_buf) {
 					LookupResult::Direct(tok) => {
@@ -151,8 +135,6 @@ where I: Iterator, I::Item: IntoIterator<Item = u8> + Debug {
 					},
 					LookupResult::NotYet => continue,
 				};
-
-				#[allow(unreachable_code, path_statements)] {_guard;}
 			}
 		}
 
@@ -301,64 +283,58 @@ mod test_unpack {
 		}
 	}
 
-	fn expand<const N: usize>(expected: &'static [u8], src: [&[u8]; N]) {
-		expand2(expected, &src[..])
-	}
-
-	fn expand2(expected: &'static [u8], src: &[&[u8]]) {
+	fn expand(expected: &'static [u8], src: &[u8]) {
 		println!("\ncase: {:?}", expected);
-		let expander = super::TokenUnpacker::new(src.iter().map(|i| i.iter().copied()));
+		let expander = super::TokenUnpacker::new(src.iter().copied());
 		assert_eq!(expected, &*expander.collect::<Vec<u8>>());
 	}
 
 	#[test]
 	fn expand_pure_ascii() {
-		expand(b"hello\n", [b"hello"]);
+		expand(b"hello\n", b"hello");
 	}
 
 	#[test]
 	fn expand_direct() {
-		expand(b"PRINT CHR$32\n", [b"\xf1 \xbd32"]);
-		expand(b"PRINTCHR$32\n", [b"\xf1\xbd32"]);
+		expand(b"PRINT CHR$32\n", b"\xf1 \xbd32");
+		expand(b"PRINTCHR$32\n", b"\xf1\xbd32");
 	}
 
 	#[test]
 	fn expand_indirect() {
-		expand(b"SYS87\n", [b"\x8d\xc8\x1487"])
+		expand(b"SYS87\n", b"\x8d\xc8\x1487")
 	}
 
 	#[test]
 	fn multiline() {
-		expand(b"line 1\nline 2\n", [b"line 1", b"line 2"]);
-		expand(b"", []);
+		expand(b"line 1\nline 2\n", b"line 1\rline 2");
+		expand(b"", b"");
 	}
 
 	#[test]
 	fn abandoned_indirects() {
-		expand(b"\x8d\n", [b"\x8d"]);
-		expand(b"\x8d\xc7\n\x8d\xc8\n", [b"\x8d\xc7", b"\x8d\xc8"])
+		expand(b"\x8d\n", b"\x8d");
+		expand(b"\x8d\xc7\n\x8d\xc8\n", b"\x8d\xc7\r\x8d\xc8")
 	}
 
 	#[test]
 	fn failed_direct() {
-		expand(b"\xc6\n", [b"\xc6"]);
-		expand(b"\xc7\n", [b"\xc7"]);
-		expand(b"\xc8\n", [b"\xc8"]);
+		expand(b"\xc6\n", b"\xc6");
+		expand(b"\xc7\n", b"\xc7");
+		expand(b"\xc8\n", b"\xc8");
 	}
 
 	#[test]
 	fn interrupt_indirect_with_another() {
-		expand(b"\x8dSUM\n", [b"\x8d\x8d\xc6\x03"]);
-		expand(b"\x8d\xc7SUM\n", [b"\x8d\xc7\x8d\xc6\x03"]);
+		expand(b"\x8dSUM\n", b"\x8d\x8d\xc6\x03");
+		expand(b"\x8d\xc7SUM\n", b"\x8d\xc7\x8d\xc6\x03");
 	}
 
 	#[test]
 	fn just_look_around_you() {
 		// TODO line number references don't work like this
-		expand(b"10 PRINT \"LOOK AROUND YOU \";\n20 GOTO 10\n", [
-			b"10 \xf1 \"LOOK AROUND YOU \";",
-			b"20 \xe5 10"
-		]);
+		expand(b"10 PRINT \"LOOK AROUND YOU \";\n20 GOTO 10\n",
+				b"10 \xf1 \"LOOK AROUND YOU \";\r20 \xe5 10");
 	}
 }
 
