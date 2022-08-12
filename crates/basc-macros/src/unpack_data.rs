@@ -9,20 +9,42 @@ pub(super) fn generate(table: &AllMaps) -> TokenStream {
 	// this is fairly straightforward tbh
 
 	let mut ts = TokenStream::new();
-	output(&mut ts, &table.tokens_direct, "DIRECT");
-	output(&mut ts, &table.tokens_8d_c6, "8D_C6");
-	output(&mut ts, &table.tokens_8d_c7, "8D_C7");
-	output(&mut ts, &table.tokens_8d_c8, "8D_C8");
+	let mut line_keywords = Vec::with_capacity(2);
+	output(&mut ts, &mut line_keywords, &table.tokens_direct, "DIRECT");
+	output(&mut ts, &mut line_keywords, &table.tokens_8d_c6, "8D_C6");
+	output(&mut ts, &mut line_keywords, &table.tokens_8d_c7, "8D_C7");
+	output(&mut ts, &mut line_keywords, &table.tokens_8d_c8, "8D_C8");
+
+
+	let mut ts_ldk = TokenStream::new();
+	for &ldbyte in &line_keywords {
+		ts_ldk.extend(quote!(#ldbyte,));
+	}
+	let ts_ldk_len = line_keywords.len();
+
+	let ts_ldk = TokenTree::Group(Group::new(Delimiter::Bracket, ts_ldk));
+
+	ts.extend(quote! {
+		static LINE_DEPENDENT_KEYWORD_BYTES: [u8; #ts_ldk_len] = #ts_ldk;
+	});
 
 	return ts;
 
-	fn output<'a>(ts: &mut TokenStream, table: &TokenMap, name_suffix: &'static str) {
+	fn output<'a>(ts: &mut TokenStream, line_keywords: &mut Vec<u8>,
+		table: &TokenMap, name_suffix: &'static str
+	) {
 		let mut inside_array = TokenStream::new();
 		let none = quote!(::core::option::Option::None,);
 
 		let mut as_array: [Option<&AsciiStr>; 256] = [None; 256];
 		for (&byte, string) in table {
-			as_array[byte as usize] = Some(string.as_ref());
+			let s = string.as_ref();
+			if s == "GOTO" || s == "GOSUB" {
+				// these keywords rely on line numbers
+				assert!(&name_suffix[..2] != "8D", "GOTO/GOSUB cannot be indirect");
+				line_keywords.push(byte);
+			}
+			as_array[byte as usize] = Some(s);
 		}
 		let as_array = as_array;
 
@@ -52,6 +74,6 @@ pub(super) fn generate(table: &AllMaps) -> TokenStream {
 		ts.extend(quote! {
 			static #array_name : [::core::option::Option<&'static ::ascii::AsciiStr>; 256]
 				= #array_ts;
-		})
+		});
 	}
 }
