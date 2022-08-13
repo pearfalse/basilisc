@@ -1,13 +1,35 @@
 use core::fmt;
 use core::fmt::Debug;
 
+use arrayvec::ArrayVec;
 use ascii::AsciiStr;
+use thiserror::Error;
 
 use basc_macros::declare_token_data;
-use super::latin1::*;
+use crate::latin1::CharExt;
+use crate::line_numbers;
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub(crate) enum UnpackError {
+	#[error("unexpected end of file")]
+	UnexpectedEof,
+	#[error("invalid line number")]
+	InvalidLineNumber,
+	#[error("line number out of range")]
+	LineNumberOutOfRange(u32),
+}
+
+impl From<line_numbers::DecodeError> for UnpackError {
+	fn from(src: line_numbers::DecodeError) -> Self {
+		match src {
+			line_numbers::DecodeError::Eof => Self::UnexpectedEof,
+			line_numbers::DecodeError::OutOfRange(r) => Self::LineNumberOutOfRange(r),
+		}
+	}
+}
 
 
-type ExpandBuf = arrayvec::ArrayVec<u8, 3>;
+type ExpandBuf = ArrayVec<u8, 3>;
 
 /// Iterator adapter to detokenise a BASIC file.
 ///
@@ -20,17 +42,38 @@ pub(crate) struct TokenUnpacker<I> {
 	output_buf: ExpandBuf, // bytes that didn't actually form a token key
 	have_output_trailing_newline: Option<bool>, // trailing newline after we get None from src
 	in_string_literal: InStringLiteral, // are we in a string literal right now?
+	line_number: LineNumber, // what's the state of line number parsing?
 }
 
+/// Tracks the state of whether parsing is in the middle of a string literal. If it is, token
+/// expansion is not performed.
+///
+/// This is a three-state enum, because what may look like a closing quote mark could also be
+/// one of a pair that denote an escaped literal quote mark character.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InStringLiteral {
+	/// Not in a string literal; look for token expansions.
 	No,
+	/// In a string literal; treat all non-ASCII bytes as Latin-1 literal characters.
 	Yes,
+	/// Either the string literal was just closed, or we are halfway through an escaped quote mark.
 	MaybeJustClosed,
 }
 
+/// Tracks the state of parsing an encoded line number.
+#[derive(Debug)]
+enum LineNumber {
+	Building(LineNumberBuilding),
+	Releasing(LineNumberReleasing),
+	None,
+}
+
+type LineNumberBuilding = ArrayVec<u8, 3>;
+type LineNumberReleasing = arrayvec::IntoIter<u8, 6>; // 18-bit number, remember
+
 impl<I> TokenUnpacker<I>
 where I: Iterator<Item = u8> + Debug {
+	/// Creates a new unpacker from a byte iterator.
 	pub(crate) fn new(src: I) -> Self {
 		Self {
 			src,
@@ -39,12 +82,15 @@ where I: Iterator<Item = u8> + Debug {
 			output_buf: ExpandBuf::default(),
 			have_output_trailing_newline: None,
 			in_string_literal: InStringLiteral::No,
+			line_number: LineNumber::Building(ArrayVec::new()),
 		}
 	}
 
 	#[inline(always)]
 	fn should_decode_tokens(&self) -> bool { self.in_string_literal == InStringLiteral::No }
 
+	/// Takes an ASCII string literal from `declare_token_data!`, stores the iterator in
+	/// `self`, and returns the first character (which is guaranteed to be present).
 	fn read_new_expansion(&mut self, tok: &'static AsciiStr) -> u8 {
 		self.token_read = tok.chars();
 		match self.token_read.next() {
@@ -72,18 +118,27 @@ where I: Iterator<Item = u8> {
 
 impl<I> Iterator for TokenUnpacker<I>
 where I: Iterator<Item = u8> + Debug {
-	type Item = char;
+	type Item = Result<char, UnpackError>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		let unclean = (|| loop {
 			// check any existing tokens to be flushed out
 			if let Some(token_char) = self.token_read.next() {
-				return Some(token_char.as_byte());
+				return Some(Ok(token_char.as_byte()));
 			}
 
 			// check for chars that we tried to turn into a token key but couldn't
 			if let non_key @ Some(_) = self.output_buf.pop_at(0) {
-				return non_key;
+				return non_key.map(Result::Ok);
+			}
+
+			// check for releasing decoded line number
+			if let LineNumber::Releasing(ref mut digits) = self.line_number {
+				if let Some(d) = digits.next() {
+					return Some(Ok(d));
+				} else {
+					self.line_number = LineNumber::None;
+				}
 			}
 
 			let nc = match self.src.next() {
@@ -104,24 +159,57 @@ where I: Iterator<Item = u8> + Debug {
 							InStringLiteral::MaybeJustClosed => InStringLiteral::Yes,
 						};
 					} else if self.in_string_literal == InStringLiteral::MaybeJustClosed {
-						// previous `"` wasn't an escape, we really are closed noe
+						// previous `"` wasn't an escape, we really are closed now
 						self.in_string_literal = InStringLiteral::No;
 					}
 
 					c
 				},
 				None => {
+					// check for any incomplete line numbers
+					if matches!(self.line_number, LineNumber::Building(ref x) if x.len() > 0) {
+						return Some(Err(UnpackError::UnexpectedEof));
+					}
+
 					// there may be incomplete tokens to flush
 					self.output_buf = core::mem::replace(&mut self.token_key_buf,
 						ExpandBuf::default());
 					if ! self.output_buf.is_empty() { continue; }
 					if self.have_output_trailing_newline == Some(false) {
 						self.have_output_trailing_newline = Some(true);
-						return Some(b'\r'); // use \r here to bypass ^I expansion later
+						return Some(Ok(b'\r')); // use \r here to bypass ^I expansion later
 					}
 					return None;
 				},
 			};
+
+			debug_assert!(! matches!(self.line_number, LineNumber::Releasing(_)));
+			// are we expecting an encoded line number?
+			if let LineNumber::Building(ref mut b) = self.line_number {
+				match nc {
+					b' ' | b'\t' if b.is_empty() => continue, // ignore leading spaces
+					_ => {},
+				}
+				b.push(nc);
+				if b.len() == 3 {
+					let mut raw_ln = match super::line_numbers::try_decode_from(
+						b.clone().into_iter()
+					) {
+						Ok(n) => n,
+						Err(e) => return Some(Err(e.into())),
+					};
+					let mut digits = ArrayVec::new();
+					if raw_ln == 0 { digits.push(b'0'); }
+					while raw_ln > 0 {
+						let single_digit = (raw_ln % 10) as u8;
+						digits.push(single_digit + b'0');
+						raw_ln /= 10;
+					}
+					digits.reverse();
+					self.line_number = LineNumber::Releasing(digits.into_iter());
+				}
+				continue; // that character was consumed, get another one to output
+			}
 
 			// it's a debug assert in theory, but other unskippable bounds checks occur later
 			// so we try to combine them
@@ -135,48 +223,52 @@ where I: Iterator<Item = u8> + Debug {
 						// 1-char token
 
 						// prepare matched token as future byte
-						return Some(self.read_new_expansion(tok));
+						return Some(Ok(self.read_new_expansion(tok)));
 					},
 					LookupResult::Indirect(tok) => {
 						// 3-char token
 
 						// prepare matched token as future byte
-						return Some(self.read_new_expansion(tok));
+						return Some(Ok(self.read_new_expansion(tok)));
 					},
 					LookupResult::DirectFailure(b) => {
 						// 1 byte confirmed not to be a token
 
-						return Some(b);
+						return Some(Ok(b));
 					},
 					LookupResult::InterruptedIndirect(b) => {
 						// to push out is INDIRECT_PREFIX, b
 						self.output_buf.clear();
 						self.output_buf.push(b);
 
-						return Some(INDIRECT_PREFIX); // it was just a byte after all
+						return Some(Ok(INDIRECT_PREFIX)); // it was just a byte after all
 					}
 					LookupResult::IndirectFailure([a, b, c]) => {
 						// 3 bytes that aren't a token
 
 						self.output_buf = (&[b, c][..]).try_into().unwrap();
-						return Some(a);
+						return Some(Ok(a));
 					},
 					LookupResult::NotYet => continue,
 				}
-			} else { return Some(nc); }
+			} else { return Some(Ok(nc)); }
 		})();
 
-		unclean.map(|c| match c {
+		unclean.map(|r| r.map(|c| match c {
 			// output unix newlines
 			b'\r' => {
 				// string literals never wrap lines
 				self.in_string_literal = InStringLiteral::No;
+
+				// expect a line number next
+				self.line_number = LineNumber::Building(ArrayVec::new());
+
 				'\n'
 			},
 
 			// then convert from latin-1
-			_ => c.from_risc_os_latin1(),
-		})
+			_ => char::from_risc_os_latin1(c),
+		}))
 	}
 }
 
@@ -185,16 +277,24 @@ const INDIRECT_C6: u8 = 0xc6;
 const INDIRECT_C7: u8 = 0xc7;
 const INDIRECT_C8: u8 = 0xc8;
 
+/// The result of attempting to match up to 3 bytes with known token encodings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum LookupResult {
+	/// We found a direct (1 byte) token.
 	Direct(&'static AsciiStr),
+	/// We found an indirect (3 bytes) token.
 	Indirect(&'static AsciiStr),
+	/// This may be an indirect token, but there aren't enough bytes to know yet.
 	NotYet,
+	/// This byte could not be a token; return it as-is.
 	DirectFailure(u8),
+	/// These bytes were not an indirect token; return them as they are.
 	IndirectFailure([u8; 3]),
+	/// A potential indirect sequence was interrupted; return the first byte as-is.
 	InterruptedIndirect(u8),
 }
 
+/// Try to look up a keyword from a potential token, returning as much as is known.
 fn query_token(src: &mut ExpandBuf) -> LookupResult {
 	match src.get(0) {
 		Some(&INDIRECT_PREFIX) => {
@@ -325,70 +425,83 @@ mod test_unpack {
 	fn expand(expected: &'static str, src: &[u8]) {
 		println!("\ncase: {:?}", expected);
 		let expander = super::TokenUnpacker::new(src.iter().copied());
-		assert_eq!(expected, &*expander.collect::<String>());
+		let result = expander.collect::<Result<String, _>>();
+		assert_eq!(Ok(expected), result.as_deref());
+	}
+
+	fn expand_err(expected: UnpackError, src: &[u8]) {
+		let expander = super::TokenUnpacker::new(src.iter().copied());
+		let result = expander.collect::<Result<String, _>>();
+		assert_eq!(Err(expected), result);
 	}
 
 	#[test]
 	fn expand_pure_ascii() {
-		expand("hello\n", b"hello");
+		expand("10hello\n", b"TJ@hello");
 	}
 
 	#[test]
 	fn expand_direct() {
-		expand("PRINT CHR$32\n", b"\xf1 \xbd32");
-		expand("PRINTCHR$32\n", b"\xf1\xbd32");
+		expand("10PRINT CHR$32\n", b"TJ@\xf1 \xbd32");
+		expand("10PRINTCHR$32\n", b"TJ@\xf1\xbd32");
 	}
 
 	#[test]
 	fn expand_indirect() {
-		expand("SYS87\n", b"\x8d\xc8\x1487")
+		expand("10SYS87\n", b"TJ@\x8d\xc8\x1487")
 	}
 
 	#[test]
 	fn multiline() {
-		expand("line 1\nline 2\n", b"line 1\rline 2");
+		expand("10line 1\n20line 2\n", b"TJ@line 1\rTT@line 2");
 		expand("", b"");
 	}
 
 	#[test]
 	fn abandoned_indirects() {
-		expand("™\n", b"\x8d");
-		expand("™Ç\n™È\n", b"\x8d\xc7\r\x8d\xc8")
+		expand("10™\n", b"TJ@\x8d");
+		expand("10™Ç\n11™È\n", b"TJ@\x8d\xc7\rTK@\x8d\xc8")
 	}
 
 	#[test]
 	fn failed_direct() {
-		expand("Æ\n", b"\xc6");
-		expand("Ç\n", b"\xc7");
-		expand("È\n", b"\xc8");
+		expand("1Æ\n", b"TA@\xc6");
+		expand("1Ç\n", b"TA@\xc7");
+		expand("1È\n", b"TA@\xc8");
 	}
 
 	#[test]
 	fn interrupt_indirect_with_another() {
-		expand("™SUM\n", b"\x8d\x8d\xc6\x03");
-		expand("™ÇSUM\n", b"\x8d\xc7\x8d\xc6\x03");
+		expand("0™SUM\n", b"T@@\x8d\x8d\xc6\x03");
+		expand("0™ÇSUM\n", b"T@@\x8d\xc7\x8d\xc6\x03");
 	}
 
 	#[test]
 	fn just_look_around_you() {
 		// TODO line number references don't work like this
 		expand("10 PRINT \"LOOK AROUND YOU \";\n20 GOTO 10\n",
-				b"10 \xf1 \"LOOK AROUND YOU \";\r20 \xe5 10");
+				b"TJ@ \xf1 \"LOOK AROUND YOU \";\rTT@ \xe5 10");
 	}
 
 	#[test]
 	fn string_literals() {
 		// basic case
-		expand("\"test\"\n", b"\"test\"");
+		expand("1\"test\"\n", b"TA@\"test\"");
 		// escaped literal quote
-		expand("\"A\"\"B\"\"\"\"C\"\n", b"\"A\"\"B\"\"\"\"C\"");
+		expand("1\"A\"\"B\"\"\"\"C\"\n", b"TA@\"A\"\"B\"\"\"\"C\"");
 		// unterminated literal handled realtively gracefully
-		expand("PRINT \"unclosed\nEND\n", b"\xf1 \"unclosed\r\xe0");
+		expand("1PRINT \"unclosed\n2END\n", b"TA@\xf1 \"unclosed\rTB@\xe0");
 	}
 
 	#[test]
 	fn no_decode_in_string_literals() {
-		expand("LOAD \"™Ç\u{2418}\"\n", b"\x8d\xc7\x18 \"\x8d\xc7\x18\"")
+		expand("1LOAD \"™Ç\u{2418}\"\n", b"TA@\x8d\xc7\x18 \"\x8d\xc7\x18\"")
+	}
+
+	#[test]
+	fn bad_line_number() {
+		expand_err(UnpackError::UnexpectedEof, b"T");
+		expand_err(UnpackError::UnexpectedEof, b"TJ");
 	}
 }
 

@@ -11,11 +11,11 @@
 //!
 //! Given three source bytes `A` `B` `C`, and a final line number `F`, the decoding process looks like this:
 //!
-//! • initialise `F` to `0x4040`;
-//! • xor F[15->14] with A[3->2];
-//! • xor F[13->8] with C[5->0];
-//! • xor F[7->6] with A[5->4];
-//! • xor F[5->0] with B[5->0].
+//! - initialise `F` to `0x4040`;
+//! - xor F[15 → 14] with A[3 → 2];
+//! - xor F[13 → 8] with C[5 → 0];
+//! - xor F[7 → 6] with A[5 → 4];
+//! - xor F[5 → 0] with B[5 → 0].
 //!
 //! The encoding process is the direct inverse of this, although for full correctness, any final bytes between `0x00` and `0x3e` should be OR'd with `0x40`.
 //!
@@ -45,6 +45,7 @@ pub fn try_decode_from<I: Iterator<Item = u8>>(mut encoded: I) -> Result<u32, De
 	try_decode([a, b, c])
 }
 
+// TODO this Ok path should be u16{}
 pub fn try_decode(encoded: Encoded) -> Result<u32, DecodeError> {
 
 	let a = encoded[0] as u32;
