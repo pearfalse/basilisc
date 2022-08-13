@@ -40,7 +40,7 @@ pub(crate) struct TokenUnpacker<I> {
 	token_read: ascii::Chars<'static>, // remaining chars from a matched token
 	token_key_buf: ExpandBuf, // bytes that might form a token key
 	output_buf: ExpandBuf, // bytes that didn't actually form a token key
-	have_output_trailing_newline: Option<bool>, // trailing newline after we get None from src
+	have_output_trailing_newline: bool, // trailing newline after we get None from src
 	in_string_literal: InStringLiteral, // are we in a string literal right now?
 	line_number: LineNumber, // what's the state of line number parsing?
 }
@@ -63,7 +63,7 @@ enum InStringLiteral {
 /// Tracks the state of parsing an encoded line number.
 #[derive(Debug)]
 enum LineNumber {
-	Building(LineNumberBuilding),
+	Building(LineNumberBuilding, bool), // bool := preserve leading whitespace
 	Releasing(LineNumberReleasing),
 	None,
 }
@@ -80,9 +80,9 @@ where I: Iterator<Item = u8> + Debug {
 			token_read: <&'static AsciiStr>::default().chars(),
 			token_key_buf: ExpandBuf::default(),
 			output_buf: ExpandBuf::default(),
-			have_output_trailing_newline: None,
+			have_output_trailing_newline: true, // so that no input == no output
 			in_string_literal: InStringLiteral::No,
-			line_number: LineNumber::Building(ArrayVec::new()),
+			line_number: LineNumber::Building(ArrayVec::new(), true),
 		}
 	}
 
@@ -143,12 +143,15 @@ where I: Iterator<Item = u8> + Debug {
 
 			let nc = match self.src.next() {
 				Some(c) => {
-					if self.have_output_trailing_newline.is_none() {
-						// there was something on the input, so care about trailing newlines
-						self.have_output_trailing_newline = Some(false);
-					}
+					// there was something on the input, so care about trailing newlines
+					self.have_output_trailing_newline = false;
 
-					if c == b'"' {
+					if c == b'\r' && matches!(self.line_number,
+						LineNumber::Building(ref b, _) if b.len() > 0
+					) {
+						// newline when GOTO/GOSUB line was unfinished
+						return Some(Err(UnpackError::InvalidLineNumber));
+					} else if c == b'"' {
 						// update whether we're in a string literal
 						self.in_string_literal = match self.in_string_literal {
 							// this quote mark opens it
@@ -167,7 +170,7 @@ where I: Iterator<Item = u8> + Debug {
 				},
 				None => {
 					// check for any incomplete line numbers
-					if matches!(self.line_number, LineNumber::Building(ref x) if x.len() > 0) {
+					if matches!(self.line_number, LineNumber::Building(ref x, _) if x.len() > 0) {
 						return Some(Err(UnpackError::UnexpectedEof));
 					}
 
@@ -175,8 +178,7 @@ where I: Iterator<Item = u8> + Debug {
 					self.output_buf = core::mem::replace(&mut self.token_key_buf,
 						ExpandBuf::default());
 					if ! self.output_buf.is_empty() { continue; }
-					if self.have_output_trailing_newline == Some(false) {
-						self.have_output_trailing_newline = Some(true);
+					if ! self.have_output_trailing_newline {
 						return Some(Ok(b'\r')); // use \r here to bypass ^I expansion later
 					}
 					return None;
@@ -185,9 +187,13 @@ where I: Iterator<Item = u8> + Debug {
 
 			debug_assert!(! matches!(self.line_number, LineNumber::Releasing(_)));
 			// are we expecting an encoded line number?
-			if let LineNumber::Building(ref mut b) = self.line_number {
+			if let LineNumber::Building(ref mut b, ignore_leading_ws) = self.line_number {
 				match nc {
-					b' ' | b'\t' if b.is_empty() => continue, // ignore leading spaces
+					ws @ b' ' | ws @ b'\t' if b.is_empty() => if ignore_leading_ws {
+						continue //
+					} else {
+						return Some(Ok(ws))
+					},
 					_ => {},
 				}
 				b.push(nc);
@@ -221,6 +227,15 @@ where I: Iterator<Item = u8> + Debug {
 				match query_token(&mut self.token_key_buf) {
 					LookupResult::Direct(tok) => {
 						// 1-char token
+
+						if LINE_DEPENDENT_KEYWORD_BYTES.iter()
+						.map(|&g| TOKEN_MAP_DIRECT[g as usize]
+							.map(AsciiStr::as_ptr).unwrap_or(core::ptr::null()))
+						.any(|p| p == tok.as_ptr()) {
+							// GOTO or GOSUB; expect a line number next
+							self.line_number = LineNumber::Building(
+								LineNumberBuilding::new(), false);
+						}
 
 						// prepare matched token as future byte
 						return Some(Ok(self.read_new_expansion(tok)));
@@ -261,7 +276,10 @@ where I: Iterator<Item = u8> + Debug {
 				self.in_string_literal = InStringLiteral::No;
 
 				// expect a line number next
-				self.line_number = LineNumber::Building(ArrayVec::new());
+				self.line_number = LineNumber::Building(ArrayVec::new(), true);
+
+				// we have sent a newline
+				self.have_output_trailing_newline = true;
 
 				'\n'
 			},
@@ -455,6 +473,7 @@ mod test_unpack {
 	fn multiline() {
 		expand("10line 1\n20line 2\n", b"TJ@line 1\rTT@line 2");
 		expand("", b"");
+		expand("1PRINT\n", b"TA@\xf1\r");
 	}
 
 	#[test]
@@ -480,7 +499,7 @@ mod test_unpack {
 	fn just_look_around_you() {
 		// TODO line number references don't work like this
 		expand("10 PRINT \"LOOK AROUND YOU \";\n20 GOTO 10\n",
-				b"TJ@ \xf1 \"LOOK AROUND YOU \";\rTT@ \xe5 10");
+				b"TJ@ \xf1 \"LOOK AROUND YOU \";\rTT@ \xe5 TJ@");
 	}
 
 	#[test]
@@ -502,6 +521,12 @@ mod test_unpack {
 	fn bad_line_number() {
 		expand_err(UnpackError::UnexpectedEof, b"T");
 		expand_err(UnpackError::UnexpectedEof, b"TJ");
+		expand_err(UnpackError::InvalidLineNumber, b"TJ\rTK@\r");
+	}
+
+	#[test]
+	fn godub() {
+		expand("1GOSUB2\n", b"TA@\xe4TB@\r");
 	}
 }
 
