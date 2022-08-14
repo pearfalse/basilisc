@@ -45,7 +45,7 @@ pub fn try_decode_from<I: Iterator<Item = u8>>(mut encoded: I) -> Result<u32, De
 	try_decode([a, b, c])
 }
 
-// TODO this Ok path should be u16{}
+// TODO this Ok path should be u16
 pub fn try_decode(encoded: Encoded) -> Result<u32, DecodeError> {
 
 	let a = encoded[0] as u32;

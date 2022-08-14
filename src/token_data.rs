@@ -19,6 +19,13 @@ pub(crate) enum UnpackError {
 	LineNumberOutOfRange(u32),
 }
 
+#[cfg(debug_assertions)]
+impl From<std::convert::Infallible> for UnpackError {
+	fn from(i: std::convert::Infallible) -> Self {
+		match i {}
+	}
+}
+
 impl From<line_numbers::DecodeError> for UnpackError {
 	fn from(src: line_numbers::DecodeError) -> Self {
 		match src {
@@ -71,8 +78,8 @@ enum LineNumber {
 type LineNumberBuilding = ArrayVec<u8, 3>;
 type LineNumberReleasing = arrayvec::IntoIter<u8, 6>; // 18-bit number, remember
 
-impl<I> TokenUnpacker<I>
-where I: Iterator<Item = u8> + Debug {
+impl<I, E> TokenUnpacker<I>
+where I: Iterator<Item = Result<u8, E>> + Debug, E: Into<UnpackError> {
 	/// Creates a new unpacker from a byte iterator.
 	pub(crate) fn new(src: I) -> Self {
 		Self {
@@ -105,8 +112,7 @@ where I: Iterator<Item = u8> + Debug {
 	}
 }
 
-impl<I> Debug for TokenUnpacker<I>
-where I: Iterator<Item = u8> {
+impl<I> Debug for TokenUnpacker<I> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.debug_struct("TokenUnpacker")
 			.field("of found token", &self.token_read.as_str())
@@ -116,8 +122,8 @@ where I: Iterator<Item = u8> {
 	}
 }
 
-impl<I> Iterator for TokenUnpacker<I>
-where I: Iterator<Item = u8> + Debug {
+impl<I, E> Iterator for TokenUnpacker<I>
+where I: Iterator<Item = Result<u8, E>> + Debug, E: Into<UnpackError> {
 	type Item = Result<char, UnpackError>;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -142,7 +148,7 @@ where I: Iterator<Item = u8> + Debug {
 			}
 
 			let nc = match self.src.next() {
-				Some(c) => {
+				Some(Ok(c)) => {
 					// there was something on the input, so care about trailing newlines
 					self.have_output_trailing_newline = false;
 
@@ -168,6 +174,7 @@ where I: Iterator<Item = u8> + Debug {
 
 					c
 				},
+				Some(Err(e)) => return Some(Err(e.into())),
 				None => {
 					// check for any incomplete line numbers
 					if matches!(self.line_number, LineNumber::Building(ref x, _) if x.len() > 0) {
@@ -385,6 +392,7 @@ fn query_token(src: &mut ExpandBuf) -> LookupResult {
 #[cfg(test)]
 mod test_unpack {
 	use super::*;
+	use core::convert::Infallible;
 
 	#[test]
 	fn query_token_matches() {
@@ -442,13 +450,15 @@ mod test_unpack {
 
 	fn expand(expected: &'static str, src: &[u8]) {
 		println!("\ncase: {:?}", expected);
-		let expander = super::TokenUnpacker::new(src.iter().copied());
+		let expander = super::TokenUnpacker::new(src.iter()
+			.map(|&c| Result::<u8, Infallible>::Ok(c)));
 		let result = expander.collect::<Result<String, _>>();
 		assert_eq!(Ok(expected), result.as_deref());
 	}
 
 	fn expand_err(expected: UnpackError, src: &[u8]) {
-		let expander = super::TokenUnpacker::new(src.iter().copied());
+		let expander = super::TokenUnpacker::new(src.iter()
+			.map(|&c| Result::<u8, Infallible>::Ok(c)));
 		let result = expander.collect::<Result<String, _>>();
 		assert_eq!(Err(expected), result);
 	}
@@ -525,7 +535,7 @@ mod test_unpack {
 	}
 
 	#[test]
-	fn godub() {
+	fn gosub() {
 		expand("1GOSUB2\n", b"TA@\xe4TB@\r");
 	}
 }
