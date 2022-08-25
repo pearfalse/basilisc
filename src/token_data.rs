@@ -26,11 +26,11 @@ impl From<std::convert::Infallible> for UnpackError {
 	}
 }
 
-impl From<line_numbers::DecodeError> for UnpackError {
-	fn from(src: line_numbers::DecodeError) -> Self {
+impl From<line_numbers::RiscOsDecodeError> for UnpackError {
+	fn from(src: line_numbers::RiscOsDecodeError) -> Self {
 		match src {
-			line_numbers::DecodeError::Eof => Self::UnexpectedEof,
-			line_numbers::DecodeError::OutOfRange(r) => Self::LineNumberOutOfRange(r),
+			line_numbers::RiscOsDecodeError::Eof => Self::UnexpectedEof,
+			line_numbers::RiscOsDecodeError::OutOfRange(r) => Self::LineNumberOutOfRange(r),
 		}
 	}
 }
@@ -205,7 +205,7 @@ where I: Iterator<Item = Result<u8, E>> + Debug, E: Into<UnpackError> {
 				}
 				b.push(nc);
 				if b.len() == 3 {
-					let mut raw_ln = match super::line_numbers::try_decode_from(
+					let mut raw_ln = match super::line_numbers::try_decode_riscos_from(
 						b.clone().into_iter()
 					) {
 						Ok(n) => n,
