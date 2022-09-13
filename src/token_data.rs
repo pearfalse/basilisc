@@ -26,12 +26,18 @@ impl From<std::convert::Infallible> for UnpackError {
 	}
 }
 
-impl From<line_numbers::RiscOsDecodeError> for UnpackError {
-	fn from(src: line_numbers::RiscOsDecodeError) -> Self {
+impl From<line_numbers::DecodeError> for UnpackError {
+	fn from(src: line_numbers::DecodeError) -> Self {
 		match src {
-			line_numbers::RiscOsDecodeError::Eof => Self::UnexpectedEof,
-			line_numbers::RiscOsDecodeError::OutOfRange(r) => Self::LineNumberOutOfRange(r),
+			line_numbers::DecodeError::Eof => Self::UnexpectedEof,
+			line_numbers::DecodeError::OutOfRange(r) => Self::LineNumberOutOfRange(r),
 		}
+	}
+}
+
+impl From<std::io::Error> for UnpackError {
+	fn from(src: std::io::Error) -> Self {
+		Self::IoError(format!("{}", src))
 	}
 }
 

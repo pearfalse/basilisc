@@ -1,3 +1,7 @@
 /target
 /scratch
 *.sublime-workspace
+
+# MacOS garbage
+._*
+.DS_Store

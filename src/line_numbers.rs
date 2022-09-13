@@ -1,12 +1,11 @@
-//! Handle line number encoding in RISC OS tokenised BASIC files.
+//! Handle line number encoding in GOTO/GOSUB references.
 //!
-//! RISC OS' BASIC module adds a new line number format, different to the ASCII one used on the BBC
-//! Micro. This is only used for GOTO and GOSUB operands; why it exists is unclear.
+//! BBC BASIC uses a different line number encoding when following a GOTO or GOSUB statement;
+//! this is done for performance and interpreter simplicity[^1].
 //!
-//! The new line number format consists of a 0x8d byte, followed by three bytes that encode an
-//! 18-bit number. The format appears to be more futureproofed than the BASIC interpreter will
-//! actually allow. The extra redundancy in this encoding is used to keep all three bytes out of the
-//! numeric range of printable ASCII digits.
+//! The line number format consists of a 0x8d byte, followed by three bytes that encode the line
+//! reference. The extra redundancy in this encoding is used to keep all three bytes with the range
+//! of printable ASCII characters.
 //!
 //! Given three source bytes `A` `B` `C`, and a final line number `F`, the decoding process looks
 //! like this:
@@ -20,13 +19,15 @@
 //! The encoding process is the direct inverse of this, although for full correctness, any final
 //! bytes between `0x00` and `0x3e` should be OR'd with `0x40`. `0x0d` must be avoided.
 //!
+//! [https://web.archive.org/web/20081203145001/www.nelsonit.net/~jon/BBCMicro/2005/06/27/165311.html],
+//! via [https://xania.org/200711/bbc-basic-line-number-format]
 
 use thiserror::Error;
 
-pub type RiscOsEncoded = [u8; 3];
+pub type Encoded = [u8; 3];
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-pub enum RiscOsDecodeError {
+pub enum DecodeError {
 	#[error("unexpected end of file (required 3 bytes to decode)")]
 	Eof,
 	#[error("out of range (decoded value was &{0:x}, but must be < &ff00")]
@@ -34,10 +35,10 @@ pub enum RiscOsDecodeError {
 }
 
 pub fn try_decode_riscos_from<I: Iterator<Item = u8>>(mut encoded: I)
--> Result<u32, RiscOsDecodeError> {
+-> Result<u32, DecodeError> {
 	let mut try_next = move || match encoded.next() {
 		Some(i) => Ok(i),
-		None => Err(RiscOsDecodeError::Eof)
+		None => Err(DecodeError::Eof)
 	};
 
 	let a = try_next()?;
@@ -48,7 +49,7 @@ pub fn try_decode_riscos_from<I: Iterator<Item = u8>>(mut encoded: I)
 }
 
 // TODO this Ok path should be u16
-pub fn try_decode_riscos(encoded: RiscOsEncoded) -> Result<u32, RiscOsDecodeError> {
+pub fn try_decode_riscos(encoded: Encoded) -> Result<u32, DecodeError> {
 
 	let a = encoded[0] as u32;
 	let b = encoded[1] as u32;
@@ -75,7 +76,7 @@ pub fn try_decode_riscos(encoded: RiscOsEncoded) -> Result<u32, RiscOsDecodeErro
 	^ (b & 0b11_1111)
 
 	;
-	if tgt < 0xff00 { Ok(tgt) } else { Err(RiscOsDecodeError::OutOfRange(tgt)) }
+	if tgt < 0xff00 { Ok(tgt) } else { Err(DecodeError::OutOfRange(tgt)) }
 }
 
 #[cfg(test)]
@@ -109,7 +110,7 @@ mod test_decode {
 			&[0x40, 0x50],
 		];
 		for data in data_cases {
-			assert_eq!(Err(RiscOsDecodeError::Eof), try_decode_riscos_from(data.iter().copied()));
+			assert_eq!(Err(DecodeError::Eof), try_decode_riscos_from(data.iter().copied()));
 		}
 	}
 
@@ -127,8 +128,8 @@ mod test_decode {
 
 		for (data, expected) in data_cases {
 			match try_decode_riscos(data) {
-				Err(RiscOsDecodeError::OutOfRange(e)) if e == expected => expected,
-				Err(RiscOsDecodeError::OutOfRange(other)) =>
+				Err(DecodeError::OutOfRange(e)) if e == expected => expected,
+				Err(DecodeError::OutOfRange(other)) =>
 					panic!("unexpected OOR number (expected &{0:05x}, got &{1:05x}",
 						expected, other),
 				r#else => panic!("unexpected other value {:?}", r#else),
