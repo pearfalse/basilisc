@@ -2,10 +2,20 @@
 	"folders":
 	[
 		{
-			"path": "."
+			"path": ".",
 		},
 		{
-			"path": "/Users/simon/code/acorn-rust/scratch"
+			"path": "/Users/simon/code/acorn-rust/scratch",
 		}
-	]
+	],
+	"settings":
+	{
+		"LSP":
+		{
+			"rust-analyzer":
+			{
+				"enabled": true
+			}
+		}
+	},
 }
