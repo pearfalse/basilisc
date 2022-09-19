@@ -43,6 +43,10 @@ type TokenEncodeMap = phf::Map<&'static str, u8>;
 		"pub(crate) static LINE_DEPENDENT_KEYWORD_BYTES: [u8; 2] = [0x{:02x}, 0x{:02x}];\n",
 		token_goto, token_gosub)?;
 
+
+	// TODO write parsing map
+
+
 	gen_token_data.sync_all()?;
 	return Ok(());
 
@@ -66,8 +70,6 @@ type TokenEncodeMap = phf::Map<&'static str, u8>;
 		}
 		writeln!(file, "];\n")
 	}
-
-	// TODO write parsing map
 }
 
 static TOKEN_MAP_DIRECT: RawTokenMap = &[
