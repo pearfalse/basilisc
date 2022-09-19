@@ -7,9 +7,11 @@ use std::error::Error;
 
 use gumdrop::Options;
 
+mod support;
 mod token_data;
 mod line_numbers;
 mod latin1;
+mod unpack;
 
 #[derive(Debug, Options)]
 enum Command {
