@@ -40,7 +40,7 @@ type TokenEncodeMap = phf::Map<&'static str, u8>;
 	write_array!(TOKEN_MAP_C8)?;
 
 	writeln!(&mut gen_token_data,
-		"static LINE_DEPENDENT_KEYWORD_BYTES: [u8; 2] = [0x{:02x}, 0x{:02x}];\n",
+		"pub(crate) static LINE_DEPENDENT_KEYWORD_BYTES: [u8; 2] = [0x{:02x}, 0x{:02x}];\n",
 		token_goto, token_gosub)?;
 
 	gen_token_data.sync_all()?;
@@ -52,7 +52,7 @@ type TokenEncodeMap = phf::Map<&'static str, u8>;
 			flat_arr[byte as usize] = Some(val);
 		}
 
-		write!(file, "static {}: TokenDecodeMap = [\n", name)?;
+		write!(file, "pub(crate) static {}: TokenDecodeMap = [\n", name)?;
 		for maybe_val in flat_arr {
 			debug_assert!(maybe_val.map(str::is_ascii).unwrap_or(true));
 			match maybe_val {
@@ -66,6 +66,8 @@ type TokenEncodeMap = phf::Map<&'static str, u8>;
 		}
 		writeln!(file, "];\n")
 	}
+
+	// TODO write parsing map
 }
 
 static TOKEN_MAP_DIRECT: RawTokenMap = &[
