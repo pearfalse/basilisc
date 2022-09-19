@@ -130,7 +130,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			}
 
 			// check for existing bytes to yield as-is
-			if let Some(b) = self.byte_flush.pop() {
+			if let Some(b) = self.byte_flush.pop_at(0) {
 				buffer.push(b);
 				continue;
 			}
@@ -140,6 +140,11 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 				line_number: ln,
 				remaining_bytes: 0
 			} = self.line_state {
+				// account for abandoned, incomplete indirects first
+				if ! self.token_lookup.is_empty() {
+					self.byte_flush = mem::replace(&mut self.token_lookup, TokenLookup::new_const());
+					continue;
+				}
 				break ln;
 			}
 
@@ -220,7 +225,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 
 		fn queue_shift<I>(this: &mut Parser<I>, next_byte: u8) -> Option<u8> {
 			this.byte_flush = mem::replace(&mut this.token_lookup, TokenLookup::new_const());
-			if let old @ Some(_) = this.byte_flush.pop() {
+			if let old @ Some(_) = this.byte_flush.pop_at(0) {
 				this.byte_flush.push(next_byte);
 				old
 			} else {
@@ -260,7 +265,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			},
 			None => {
 				// no match
-				let _8d = self.token_lookup.pop();
+				let _8d = self.token_lookup.pop_at(0);
 				debug_assert!(_8d.unwrap_or(0x8d) == 0x8d, "_8d is actually {:02x?}", _8d);
 				queue_shift(self, next_byte)
 			}
@@ -300,6 +305,30 @@ mod test_parser {
 	fn expand_direct() {
 		expand(10, b"PRINT CHR$32", b"\x0d\x00\x0a\x05\xf1 \xbd32");
 		expand(10, b"PRINTCHR$32", b"\x0d\x00\x0a\x04\xf1\xbd32");
+	}
+
+	#[test]
+	fn expand_indirect() {
+		expand(10, b"SYS87", b"\x0d\x00\x0a\x05\x8d\xc8\x1487");
+	}
+
+	#[test]
+	fn abandoned_indirects() {
+		expand(10, b"\x8d", &[13,0,10,1, 0x8d]);
+		expand(10, b"\x8d\xc7", &[13,0,10,2, 0x8d, 0xc7]);
+	}
+
+	#[test]
+	fn failed_direct() {
+		expand(1, b"\xc6", &[13,0,1,1, 0xc6]);
+		expand(1, b"\xc7", &[13,0,1,1, 0xc7]);
+		expand(1, b"\xc8", &[13,0,1,1, 0xc8]);
+	}
+
+	#[test]
+	fn interrupt_indirect_with_another() {
+		expand(0, b"\x8dSUM", &[13,0,0,4, 0x8d, 0x8d, 0xc6, 0x03]);
+		expand(0, b"\x8d\xc7SUM", &[13,0,0,5, 0x8d, 0xc7, 0x8d, 0xc6, 0x03]);
 	}
 }
 

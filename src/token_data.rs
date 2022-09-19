@@ -538,11 +538,7 @@ mod test_unpack {
 	}
 
 
-	#[test]
-	#[ignore]
-	fn expand_indirect() {
-		expand("10SYS87\n", b"TJ@\x8d\xc8\x1487")
-	}
+
 
 	#[test]
 	#[ignore]
@@ -550,28 +546,6 @@ mod test_unpack {
 		expand("10line 1\n20line 2\n", b"TJ@line 1\rTT@line 2");
 		expand("", b"");
 		expand("1PRINT\n", b"TA@\xf1\r");
-	}
-
-	#[test]
-	#[ignore]
-	fn abandoned_indirects() {
-		expand("10™\n", b"TJ@\x8d");
-		expand("10™Ç\n11™È\n", b"TJ@\x8d\xc7\rTK@\x8d\xc8")
-	}
-
-	#[test]
-	#[ignore]
-	fn failed_direct() {
-		expand("1Æ\n", b"TA@\xc6");
-		expand("1Ç\n", b"TA@\xc7");
-		expand("1È\n", b"TA@\xc8");
-	}
-
-	#[test]
-	#[ignore]
-	fn interrupt_indirect_with_another() {
-		expand("0™SUM\n", b"T@@\x8d\x8d\xc6\x03");
-		expand("0™ÇSUM\n", b"T@@\x8d\xc7\x8d\xc6\x03");
 	}
 
 	#[test]
