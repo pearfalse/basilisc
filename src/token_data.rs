@@ -537,11 +537,7 @@ mod test_unpack {
 		assert_eq!(Err(expected), result);
 	}
 
-	#[test]
-	#[ignore]
-	fn expand_pure_ascii() {
-		expand("10hello\n", b"\x0d\x00\x0a\x05hello");
-	}
+
 
 	#[test]
 	#[ignore]

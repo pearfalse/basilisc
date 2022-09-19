@@ -82,7 +82,7 @@ impl Default for LineNumberRef {
 
 
 #[derive(Debug)]
-pub struct Unpacker<I> {
+pub struct Parser<I> {
 	/// The inner byte I/O object
 	inner: I,
 	/// The state of parsing metdata about the current line
@@ -97,11 +97,9 @@ pub struct Unpacker<I> {
 	cur_token: ascii::Chars<'static>,
 	/// Have we reached the end of the BASIC file?
 	have_reached_end: bool,
-	///Do we need to send a trailing newline once we're done?
-	must_send_trailing_newline: bool,
 }
 
-impl<I> Unpacker<I>
+impl<I> Parser<I>
 where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 	pub fn new(inner: I) -> Self {
 		Self {
@@ -112,45 +110,47 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			byte_flush: ArrayVec::new_const(),
 			cur_token: <&'static AsciiStr>::default().chars(),
 			have_reached_end: false,
-			must_send_trailing_newline: false,
 		}
 	}
 
-	pub fn next_byte(&mut self) -> Result<Option<u8>, UnpackError> {
+	pub fn next_line(&mut self, buffer: &mut Vec<u8>) -> Result<Option<u16>, UnpackError> {
+		buffer.clear();
+		self.line_state = LineState::HaveNothing;
+
 		// terminated?
 		if self.have_reached_end {
 			return Ok(None);
 		}
 
-		let r = loop {
+		let line_number = loop {
 			// check for existing token unpacks first
 			if let Some(b) = self.cur_token.next() {
-				break b.as_byte();
+				buffer.push(b.as_byte());
+				continue;
 			}
 
 			// check for existing bytes to yield as-is
 			if let Some(b) = self.byte_flush.pop() {
-				break b;
+				buffer.push(b);
+				continue;
 			}
-
 
 			// handle EOL before attempting to read next byte
-			if matches!(self.line_state, LineState::InLine {
-				line_number: _,
+			if let LineState::InLine {
+				line_number: ln,
 				remaining_bytes: 0
-			}) {
-				self.line_state = LineState::HaveNothing;
-				break b'\n';
+			} = self.line_state {
+				break ln;
 			}
 
-			let nb = self.inner.next_byte()?;
+			let nb = dbg!(self.inner.next_byte()?);
 
 			// what's the line state?
 			let (line_number, remaining_bytes) = match self.line_state {
 				LineState::HaveNothing => match nb {
 					Some(0x0d) => {
 						self.line_state = LineState::Have0D;
-						continue
+						continue;
 					},
 					Some(what) => return Err(UnpackError::UnexpectedByte(what)),
 					None => return Err(UnpackError::UnexpectedEof),
@@ -164,15 +164,15 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 					Some(lh) => {
 						// line number, low byte
 						self.line_state = LineState::HaveHalfLineNumber(lh);
-						continue
+						continue;
 					},
 					None => return Err(UnpackError::UnexpectedEof),
 				},
 				LineState::HaveHalfLineNumber(lh) => match nb {
 					Some(ll) => {
-						let lf = (lh as u16) << 8 + (ll as u16);
+						let lf = ((lh as u16) << 8) + (ll as u16);
 						self.line_state = LineState::HaveFullLineNumber(lf);
-						continue
+						continue;
 					},
 					None => return Err(UnpackError::UnexpectedEof),
 				},
@@ -181,7 +181,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 						// retrieved 0 -- technically supported, kinda weird
 						Some(0) => {
 							self.line_state = LineState::HaveNothing;
-							continue
+							continue;
 						},
 						// one was retrieved
 						Some(rem) => rem,
@@ -189,7 +189,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 						None => return Err(UnpackError::UnexpectedEof),
 					};
 					self.line_state = LineState::InLine { line_number: lf, remaining_bytes: len };
-					continue
+					continue;
 				},
 				LineState::InLine { line_number, ref mut remaining_bytes }
 					=> (line_number, remaining_bytes),
@@ -198,36 +198,33 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			*remaining_bytes -= 1;
 
 			// if here, we are in a line, with at least one more byte we can (and must) read
-			let next_byte = self.inner.next_byte()
-				.map_err(UnpackError::from)
-				.and_then(|ob| ob.ok_or(UnpackError::UnexpectedEof))
-				?;
+			let next_byte = nb.ok_or(UnpackError::UnexpectedEof)?;
 
 			// TODO: LF literals should be passed straight through; what do we do about that?
 
 			if let Some(to_push) = self.update_lookup_stage(next_byte) {
-				break to_push;
+				buffer.push(to_push);
+				continue;
 			}
 
 			// no byte to push here, but there might be something in the buffer fields
 			// so drop through the bottom of the loop
 		}; // loop
 
-		self.must_send_trailing_newline = r != b'\n';
-		Ok(Some(r))
+		Ok(Some(line_number))
 	}
 
 	fn update_lookup_stage(&mut self, next_byte: u8) -> Option<u8> {
 		debug_assert!(self.cur_token.as_str().is_empty());
 		debug_assert!(self.byte_flush.is_empty());
 
-		fn queue_shift<I>(this: &mut Unpacker<I>, next_byte: u8) -> Option<u8> {
+		fn queue_shift<I>(this: &mut Parser<I>, next_byte: u8) -> Option<u8> {
 			this.byte_flush = mem::replace(&mut this.token_lookup, TokenLookup::new_const());
 			if let old @ Some(_) = this.byte_flush.pop() {
 				this.byte_flush.push(next_byte);
 				old
 			} else {
-			    Some(next_byte)
+				Some(next_byte)
 			}
 		}
 
@@ -236,19 +233,21 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			// so take whatever's in token_lookup, move it to the output
 			// sequence, and queue up another attempt
 
-			return queue_shift(self, next_byte);
+			self.byte_flush = mem::replace(&mut self.token_lookup, TokenLookup::new_const());
+			self.token_lookup.push(0x8d);
+			return None;
 		}
 
 		let decode_map = match *self.token_lookup {
 			[0x8d, 0xc6] => token_data::TOKEN_MAP_C6,
 			[0x8d, 0xc7] => token_data::TOKEN_MAP_C7,
 			[0x8d, 0xc8] => token_data::TOKEN_MAP_C8,
-			[0x8d] => token_data::TOKEN_MAP_DIRECT,
-			[] => {
-				debug_assert!(next_byte != 0x8d);
-				// not a token lookup
-				return Some(next_byte);
+			[0x8d] if (0xc6..=0xc8).contains(&next_byte) => {
+				// indirect is still ongoing
+				self.token_lookup.push(next_byte);
+				return None;
 			}
+			[] => token_data::TOKEN_MAP_DIRECT,
 			_ => return queue_shift(self, next_byte),
 		};
 
@@ -262,10 +261,39 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			None => {
 				// no match
 				let _8d = self.token_lookup.pop();
-				debug_assert!(_8d == Some(0x8d));
+				debug_assert!(_8d.unwrap_or(0x8d) == 0x8d, "_8d is actually {:02x?}", _8d);
 				queue_shift(self, next_byte)
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod test_parser {
+	use super::*;
+
+	fn expand_core(src: &[u8]) -> Parser<impl NextByte<Error = core::convert::Infallible> + '_> {
+		let faux_io = InMemoryBytes(src.iter().copied());
+		Parser::new(faux_io)
+	}
+
+	fn expand(line_number: u16, expected: &[u8], src: &[u8]) {
+		println!("\ncase: {:02x?}", expected);
+		let mut buf = Vec::new();
+		let result = expand_core(src).next_line(&mut buf);
+		assert_eq!(Ok(Some(line_number)), result);
+		assert_eq!(expected, &*buf);
+	}
+
+	fn expand_err(expected: UnpackError, src: &[u8]) {
+		let mut buf = Vec::new();
+		let result = expand_core(src).next_line(&mut buf);
+		assert_eq!(Err(expected), result);
+	}
+
+	#[test]
+	fn expand_pure_ascii() {
+		expand(10, b"hello", b"\x0d\x00\x0a\x05hello");
 	}
 }
 
