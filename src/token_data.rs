@@ -538,14 +538,6 @@ mod test_unpack {
 	}
 
 
-
-	#[test]
-	#[ignore]
-	fn expand_direct() {
-		expand("10PRINT CHR$32\n", b"\x0d\x00\x0a\x04\xf1 \xbd32");
-		expand("10PRINTCHR$32\n", b"\x0d\x00\x0a\x03\xf1\xbd32");
-	}
-
 	#[test]
 	#[ignore]
 	fn expand_indirect() {

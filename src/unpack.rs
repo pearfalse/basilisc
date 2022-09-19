@@ -143,7 +143,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 				break ln;
 			}
 
-			let nb = dbg!(self.inner.next_byte()?);
+			let nb = self.inner.next_byte()?;
 
 			// what's the line state?
 			let (line_number, remaining_bytes) = match self.line_state {
@@ -294,6 +294,12 @@ mod test_parser {
 	#[test]
 	fn expand_pure_ascii() {
 		expand(10, b"hello", b"\x0d\x00\x0a\x05hello");
+	}
+
+	#[test]
+	fn expand_direct() {
+		expand(10, b"PRINT CHR$32", b"\x0d\x00\x0a\x05\xf1 \xbd32");
+		expand(10, b"PRINTCHR$32", b"\x0d\x00\x0a\x04\xf1\xbd32");
 	}
 }
 
