@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
 #[derive(Debug)]
-pub struct Line<S> {
+pub struct Line<S = Box<[u8]>> {
 	pub line_number: u16,
 	pub data: S,
 }

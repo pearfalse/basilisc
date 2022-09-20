@@ -7,6 +7,7 @@ use std::error::Error;
 
 use gumdrop::Options;
 
+mod common;
 mod support;
 mod token_data;
 mod line_numbers;

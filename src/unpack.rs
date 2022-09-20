@@ -89,6 +89,8 @@ impl Default for LineNumberRef {
 pub struct Parser<I> {
 	/// The inner byte I/O object
 	inner: I,
+	/// Buffer used for parsing, to minimise reallocations between lines
+	buffer: Vec<u8>,
 	/// The state of parsing metdata about the current line
 	line_state: LineState,
 	/// Handles line references after GOTO/GOSUB statements
@@ -110,6 +112,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 	pub fn new(inner: I) -> Self {
 		Self {
 			inner,
+			buffer: Vec::with_capacity(256), // TODO how big can a line be?
 			line_state: LineState::default(),
 			_line_ref: (),
 			token_lookup: ArrayVec::new_const(),
@@ -120,19 +123,8 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 		}
 	}
 
-	pub fn next_line(&mut self) -> UnpackResult<Option<Line<Box<[u8]>>>> {
-		let mut buffer = Vec::new();
-		let line_number = self.next_line_raw(&mut buffer)?;
-
-		Ok(line_number.map(|ln| {
-			let mut will_box = Vec::with_capacity(buffer.len());
-			will_box.extend_from_slice(&*buffer);
-			Line::new(ln, will_box.into_boxed_slice())
-		}))
-	}
-
-	fn next_line_raw(&mut self, buffer: &mut Vec<u8>) -> UnpackResult<Option<u16>> {
-		buffer.clear();
+	pub fn next_line(&mut self) -> UnpackResult<Option<Line>> {
+		self.buffer.clear();
 		self.line_state = LineState::HaveNothing;
 
 		// terminated?
@@ -143,13 +135,13 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 		let line_number = loop {
 			// check for existing token unpacks first
 			if let Some(b) = self.cur_token.next() {
-				buffer.push(b.as_byte());
+				self.buffer.push(b.as_byte());
 				continue;
 			}
 
 			// check for existing bytes to yield as-is
 			if let Some(b) = self.byte_flush.pop_at(0) {
-				buffer.push(b);
+				self.buffer.push(b);
 				continue;
 			}
 
@@ -169,7 +161,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			let nb = self.inner.next_byte()?;
 
 			// what's the line state?
-			let (line_number, remaining_bytes) = match self.line_state {
+			let (_, remaining_bytes) = match self.line_state {
 				LineState::HaveNothing => match nb {
 					Some(0x0d) => {
 						self.line_state = LineState::Have0D;
@@ -234,16 +226,15 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 					self.string_state = StringState::MaybeClosed;
 					Some(next_byte)
 				},
-				(StringState::NotInString | StringState::MaybeClosed, false) => {
+				(StringState::MaybeClosed, false) => {
 					self.string_state = StringState::NotInString;
 					self.update_lookup_stage(next_byte)
 				},
-				(StringState::InString, false)
-					=> Some(next_byte),
-				_ => self.update_lookup_stage(next_byte),
+				(StringState::InString, false) => Some(next_byte),
+				(StringState::NotInString, false) => self.update_lookup_stage(next_byte),
 			};
 			if let Some(to_push) = to_push {
-				buffer.push(to_push);
+				self.buffer.push(to_push);
 				continue;
 			}
 
@@ -251,7 +242,11 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			// so drop through the bottom of the loop
 		}; // loop
 
-		Ok(Some(line_number))
+		Ok(Some(Line::new(line_number, {
+			let mut will_box = Vec::with_capacity(self.buffer.len());
+			will_box.extend_from_slice(&*self.buffer);
+			will_box.into_boxed_slice()
+		})))
 	}
 
 	fn update_lookup_stage(&mut self, next_byte: u8) -> Option<u8> {
