@@ -1,5 +1,4 @@
 use core::convert::Infallible;
-use core::mem;
 use std::io;
 
 use crate::{
@@ -21,13 +20,19 @@ pub enum UnpackError {
 	UnexpectedByte(u8),
 	#[error("io error: {0}")]
 	IoError(String),
-	#[error("invalid line number reference (found on line {found_on_line})")]
-	InvalidLineReference { found_on_line: u16 },
+	#[error("invalid line number reference")]
+	InvalidLineReference,
 }
 
 impl From<io::Error> for UnpackError {
 	fn from(e: io::Error) -> Self {
 		Self::IoError(e.to_string())
+	}
+}
+
+impl From<line_numbers::DecodeError> for UnpackError {
+	fn from(_: line_numbers::DecodeError) -> Self {
+		Self::InvalidLineReference
 	}
 }
 
@@ -39,8 +44,8 @@ impl From<Infallible> for UnpackError {
 
 type UnpackResult<T> = Result<T, UnpackError>;
 type TokenLookup = Option<u8>;
-type ByteFlush = ArrayVec<u8, 2>;
-type LineNumberStage = ArrayVec<u8, 3>;
+type ByteFlush = ArrayVec<u8, 5>; // decoded line number reference is the biggest
+type LineNumberStage = ArrayVec<u8, 2>; // don't need to stage the third byte
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum LineState {
@@ -71,20 +76,6 @@ enum StringState {
 
 
 #[derive(Debug)]
-enum LineNumberRef {
-	None,
-	Expect8D,
-	Filling(LineNumberStage),
-}
-
-impl Default for LineNumberRef {
-	fn default() -> Self {
-		Self::None
-	}
-}
-
-
-#[derive(Debug)]
 pub struct Parser<I> {
 	/// The inner byte I/O object
 	inner: I,
@@ -93,7 +84,7 @@ pub struct Parser<I> {
 	/// The state of parsing metdata about the current line
 	line_state: LineState,
 	/// Handles line references after GOTO/GOSUB statements
-	_line_ref: (), // TODO
+	line_ref: Option<LineNumberStage>, // TODO
 	/// Buffer to fill the 1–2 bytes of a BBC BASIC token
 	token_lookup: TokenLookup,
 	/// Buffer for potential lookups that didn't match anything, or for format hacks
@@ -113,7 +104,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			inner,
 			buffer: Vec::with_capacity(256), // TODO how big can a line be?
 			line_state: LineState::default(),
-			_line_ref: (),
+			line_ref: None,
 			token_lookup: None,
 			byte_flush: ArrayVec::new_const(),
 			cur_token: <&'static AsciiStr>::default().chars(),
@@ -153,6 +144,10 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 				if let Some(to_push) = self.token_lookup.take() {
 					self.byte_flush.push(to_push);
 					continue;
+				}
+				if self.line_ref.is_some() {
+					// unfinished line reference!
+					return Err(UnpackError::UnexpectedEof);
 				}
 				break ln;
 			}
@@ -217,6 +212,36 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 
 			// if here, we are in a line, with at least one more byte we can (and must) read
 			let next_byte = nb.ok_or(UnpackError::UnexpectedEof)?;
+
+			// handle line number references
+			if let Some(ref mut ref_stage) = self.line_ref {
+				match **ref_stage {
+					[a, b] => {
+						// TODO full reference
+						let mut decoded = line_numbers::try_decode_riscos([a, b, next_byte])?;
+						debug_assert!(self.byte_flush.is_empty());
+
+						// stringify line reference
+						let mut stage = ArrayVec::<u8, 5>::new();
+						if decoded == 0 {
+							stage.push(0);
+						}
+						while decoded > 0 {
+							stage.push((decoded % 10) as u8 + b'0');
+							decoded /= 10;
+						}
+						stage.reverse();
+						self.byte_flush = stage;
+						self.line_ref = None;
+					},
+					_ => ref_stage.push(next_byte),
+				};
+				continue;
+			}
+			if next_byte == 0x8d {
+				self.line_ref = Some(LineNumberStage::new());
+				continue;
+			}
 
 			// TODO: LF literals should be passed straight through; what do we do about that?
 			let to_push = match (self.string_state, next_byte == b'"') {
@@ -312,8 +337,11 @@ mod test_parser {
 	}
 
 	fn expand_err(expected: UnpackError, src: &[u8]) {
-		let result = expand_core(src).next_line();
-		assert_eq!(Some(expected), result.err());
+		let mut parser = expand_core(src);
+		let result = parser.next_line();
+		assert_eq!(Some(&expected), result.as_ref().err(),
+			"somehow parsed: {:02x?}", result.as_ref().ok().unwrap()
+			.as_ref().map(|line| &*line.data));
 	}
 
 	#[test]
@@ -385,10 +413,9 @@ mod test_parser {
 	}
 
 	#[test]
-	#[ignore]
 	fn just_look_around_you() {
 		let mut parser = Parser::new(
-			b"\r\0\x0a\x19\xf1 \"LOOK AROUND YOU \";\r\0\x14\x09\xe5 TJ@\r\xff"
+			b"\r\0\x0a\x19\xf1 \"LOOK AROUND YOU \";\r\0\x14\x0a\xe5 \x8dTJ@\r\xff"
 			.as_slice());
 
 		let mut expect_success = |line_number: u16, exp_data: &[u8]| {
@@ -404,20 +431,19 @@ mod test_parser {
 	}
 
 	#[test]
-	#[ignore]
 	fn goto_gosub() {
-		expand(1, b"GOTO 10\n", b"\r\0\x01\x0b\xe5TJ@\r");
-		expand(2, b"GOSUB20\n", b"\r\0\x02\x0b\xe4TT@\r");
+		expand(1, b"GOTO 10", b"\r\0\x01\x0a\xe5 \x8dTJ@");
+		expand(2, b"GOSUB20", b"\r\0\x02\x09\xe4\x8dTT@");
 	}
 
 	#[test]
-	#[ignore]
 	fn bad_line_number() {
-		expand_err(UnpackError::UnexpectedEof, b"\r\0\x0a\x05T");
-		expand_err(UnpackError::UnexpectedEof, b"\r\0\x0a\x06TJ");
-		expand_err(
-			UnpackError::InvalidLineReference { found_on_line: 69 },
-			b"\r\0\x0a\x08\xe5\x18\0?");
+		eprintln!("case 1");
+		expand_err(UnpackError::UnexpectedEof, b"\r\0\x0a\x06\x8dT");
+		eprintln!("case 2");
+		expand_err(UnpackError::UnexpectedEof, b"\r\0\x0a\x07\x8dTJ");
+		eprintln!("case 3");
+		expand_err(UnpackError::InvalidLineReference, b"\r\0\x0a\x09\xe5\x8d\x18\0?");
 	}
 }
 
