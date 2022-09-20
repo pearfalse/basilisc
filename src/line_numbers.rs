@@ -35,7 +35,7 @@ pub enum DecodeError {
 }
 
 pub fn try_decode_riscos_from<I: Iterator<Item = u8>>(mut encoded: I)
--> Result<u32, DecodeError> {
+-> Result<u16, DecodeError> {
 	let mut try_next = move || match encoded.next() {
 		Some(i) => Ok(i),
 		None => Err(DecodeError::Eof)
@@ -49,7 +49,7 @@ pub fn try_decode_riscos_from<I: Iterator<Item = u8>>(mut encoded: I)
 }
 
 // TODO this Ok path should be u16
-pub fn try_decode_riscos(encoded: Encoded) -> Result<u32, DecodeError> {
+pub fn try_decode_riscos(encoded: Encoded) -> Result<u16, DecodeError> {
 
 	let a = encoded[0] as u32;
 	let b = encoded[1] as u32;
@@ -76,7 +76,11 @@ pub fn try_decode_riscos(encoded: Encoded) -> Result<u32, DecodeError> {
 	^ (b & 0b11_1111)
 
 	;
-	if tgt < 0xff00 { Ok(tgt) } else { Err(DecodeError::OutOfRange(tgt)) }
+	if tgt < 0xff00 {
+		Ok(tgt as u16)
+	} else {
+		Err(DecodeError::OutOfRange(tgt))
+	}
 }
 
 #[cfg(test)]
