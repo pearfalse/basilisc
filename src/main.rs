@@ -1,7 +1,7 @@
-use std::borrow::{Borrow, BorrowMut, Cow};
+use std::borrow::Cow;
 use std::fmt::Debug;
-use std::io;
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::fs;
+use std::io::{self, BufReader, BufWriter, Write as _};
 use std::path::PathBuf;
 use std::error::Error;
 
@@ -13,6 +13,8 @@ mod token_data;
 mod line_numbers;
 mod latin1;
 mod unpack;
+
+use unpack::UnpackError;
 
 #[derive(Debug, Options)]
 enum Command {
@@ -89,63 +91,6 @@ impl From<ExitCode> for i32 {
 	}
 }
 
-struct ByteIo<R: BufRead>(pub R);
-
-impl<R: BufRead> Debug for ByteIo<R> {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		f.write_str("ByteIo")
-	}
-}
-
-impl<R: BufRead> Iterator for ByteIo<R> {
-	type Item = io::Result<u8>;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		match self.0.fill_buf() {
-			Ok(&[x, ..]) => Some(Ok(x)),
-			Ok(&[]) => None,
-			Err(e) => Some(Err(e)),
-		}
-	}
-}
-
-#[derive(Debug)]
-enum Input<'a> {
-	Stdio(std::io::StdinLock<'a>),
-	File(std::fs::File),
-}
-
-#[derive(Debug)]
-enum Output<'a> {
-	Stdio(std::io::StdoutLock<'a>),
-	File(std::fs::File),
-}
-
-macro_rules! _impl_io_borrows {
-	($enum:ident as $trait:path) => {
-		impl<'s, 'a: 's> Borrow<dyn $trait + 's> for $enum<'a> {
-			fn borrow(&self) -> &(dyn $trait + 's) {
-				match *self {
-					Self::Stdio(ref stdio) => stdio,
-					Self::File(ref file) => file,
-				}
-			}
-		}
-
-		impl<'s, 'a: 's> BorrowMut<dyn $trait + 's> for $enum<'a> {
-			fn borrow_mut(&mut self) -> &mut (dyn $trait + 's) {
-				match *self {
-					Self::Stdio(ref mut stdio) => stdio,
-					Self::File(ref mut file) => file,
-				}
-			}
-		}
-	};
-}
-
-_impl_io_borrows!(Input as Read);
-_impl_io_borrows!(Output as Write);
-
 
 fn main() {
 	let (process, args_str) = {
@@ -168,7 +113,7 @@ fn main() {
 		}
 	};
 
-	let mut unpack_error: Option<token_data::UnpackError> = None;
+	let mut unpack_error: Option<UnpackError> = None;
 
 	let result : Result<(), (&dyn Error, ExitCode)> = match args {
 		Command::Unpack(args) => run_unpack(args).map_err(|e| {
@@ -177,10 +122,7 @@ fn main() {
 				_ => ExitCode::InvalidData,
 			};
 
-			let error_reborrowed = unpack_error.insert(e);
-			use token_data::UnpackError;
-
-			(error_reborrowed as &dyn Error, exit_code)
+			(unpack_error.insert(e) as &dyn Error, exit_code)
 		}),
 		_ => {
 			eprintln!("not supported yet, sorry");
@@ -194,29 +136,58 @@ fn main() {
 	} else { ExitCode::Success.into() });
 }
 
-fn run_unpack(args: UnpackArgs) -> Result<(), token_data::UnpackError> {
-	let stdin = io::stdin();
-	let stdout = io::stdout();
+fn run_unpack(args: UnpackArgs) -> Result<(), unpack::UnpackError> {
+	use crate::latin1::CharExt;
 
-	let mut output = match &*args.output_file {
-		"-" => Output::Stdio(stdout.lock()),
-		path => Output::File(std::fs::File::create(path)?)
+	let stdin;
+	let mut stdin_lock;
+	let mut stdout_lock;
+
+	let stdout;
+	let mut input_file;
+	let mut output_file;
+
+	// Set output io objects
+	let output: &mut dyn io::Write = match &*args.output_file {
+		"-" => {
+			stdout = io::stdout();
+			stdout_lock = stdout.lock();
+			&mut stdout_lock
+		},
+		path => {
+			input_file = fs::File::create(path)?;
+			&mut input_file
+		}
 	};
-	let output: &mut dyn Write = output.borrow_mut();
 	let mut output = BufWriter::new(output);
 
-	let mut input = match &*args.input_file {
-		"-" => Input::Stdio(stdin.lock()),
-		path => Input::File(std::fs::File::open(path)?),
+	let input: &mut dyn io::BufRead = match &*args.input_file {
+		"-" => {
+			stdin = io::stdin();
+			stdin_lock = stdin.lock();
+			&mut stdin_lock
+		},
+		path => {
+			output_file = BufReader::new(fs::File::open(path)?);
+			&mut output_file
+		},
 	};
-	let input: &mut dyn Read = input.borrow_mut();
-	let input = ByteIo(BufReader::new(input));
 
-	let mut utf8_buffer = [0u8; 4];
-	for byte in token_data::TokenUnpacker::new(input) {
-		let this_char = byte?.encode_utf8(&mut utf8_buffer).as_bytes();
-		output.write_all(this_char)?;
+	let mut parser = unpack::Parser::new(input);
+	while let Some(line) = parser.next_line()? {
+		write!(output, "{:5} ", line.line_number)?;
+		let mut utf8_buf = [0u8; 4];
+		for latin1_byte in line.data.iter().copied() {
+			output.write_all(
+				char::from_risc_os_latin1(latin1_byte)
+				.encode_utf8(&mut utf8_buf)
+				.as_bytes()
+				)?;
+		}
+		writeln!(output)?;
 	}
+
+	output.flush()?;
 
 	Ok(())
 }

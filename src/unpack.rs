@@ -10,19 +10,15 @@ use crate::{
 };
 
 use arrayvec::ArrayVec;
-use ascii::{AsciiChar,AsciiStr};
+use ascii::AsciiStr;
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum UnpackError {
 	#[error("unexpected end of file")]
 	UnexpectedEof,
-	#[error("expected 0Dh byte to start a new line, got {} instead", .0)]
+	#[error("expected 0Dh byte to start a new line, got {:02x} instead", .0)]
 	UnexpectedByte(u8),
-	#[error("invalid line number")]
-	InvalidLineNumber,
-	#[error("line number out of range")]
-	LineNumberOutOfRange(u32),
 	#[error("io error: {0}")]
 	IoError(String),
 }
@@ -134,8 +130,8 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 
 		let line_number = loop {
 			// check for existing token unpacks first
-			if let Some(b) = self.cur_token.next() {
-				self.buffer.push(b.as_byte());
+			if let Some(byte) = self.cur_token.next() {
+				self.buffer.push(byte.as_byte());
 				continue;
 			}
 
