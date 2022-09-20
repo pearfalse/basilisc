@@ -36,7 +36,8 @@ impl From<Infallible> for UnpackError {
 }
 
 type UnpackResult<T> = Result<T, UnpackError>;
-type TokenLookup = ArrayVec<u8, 2>;
+type TokenLookup = Option<u8>;
+type ByteFlush = ArrayVec<u8, 2>;
 type LineNumberStage = ArrayVec<u8, 3>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -94,7 +95,7 @@ pub struct Parser<I> {
 	/// Buffer to fill the 1–2 bytes of a BBC BASIC token
 	token_lookup: TokenLookup,
 	/// Buffer for potential lookups that didn't match anything, or for format hacks
-	byte_flush: TokenLookup,
+	byte_flush: ByteFlush,
 	/// Iterator for remaining characters of a previous lookup match
 	cur_token: ascii::Chars<'static>,
 	/// Have we reached the end of the BASIC file?
@@ -111,7 +112,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			buffer: Vec::with_capacity(256), // TODO how big can a line be?
 			line_state: LineState::default(),
 			_line_ref: (),
-			token_lookup: ArrayVec::new_const(),
+			token_lookup: None,
 			byte_flush: ArrayVec::new_const(),
 			cur_token: <&'static AsciiStr>::default().chars(),
 			have_reached_end: false,
@@ -147,8 +148,8 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 				remaining_bytes: 0
 			} = self.line_state {
 				// account for abandoned, incomplete indirects first
-				if ! self.token_lookup.is_empty() {
-					self.byte_flush = mem::replace(&mut self.token_lookup, TokenLookup::new_const());
+				if let Some(to_push) = self.token_lookup.take() {
+					self.byte_flush.push(to_push);
 					continue;
 				}
 				break ln;
@@ -216,7 +217,6 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			let next_byte = nb.ok_or(UnpackError::UnexpectedEof)?;
 
 			// TODO: LF literals should be passed straight through; what do we do about that?
-
 			let to_push = match (self.string_state, next_byte == b'"') {
 				(StringState::NotInString | StringState::MaybeClosed, true) => {
 					self.string_state = StringState::InString;
@@ -254,8 +254,8 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 		debug_assert!(self.byte_flush.is_empty());
 
 		fn queue_shift<I>(this: &mut Parser<I>, next_byte: u8) -> Option<u8> {
-			this.byte_flush = mem::replace(&mut this.token_lookup, TokenLookup::new_const());
-			if let old @ Some(_) = this.byte_flush.pop_at(0) {
+			this.byte_flush.clear();
+			if let old @ Some(_) = this.token_lookup.take() {
 				this.byte_flush.push(next_byte);
 				old
 			} else {
@@ -263,40 +263,28 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			}
 		}
 
-		if next_byte == 0x8d {
-			// 8d is always a leading escape byte, never a continuation byte
-			// so take whatever's in token_lookup, move it to the output
-			// sequence, and queue up another attempt
-
-			self.byte_flush = mem::replace(&mut self.token_lookup, TokenLookup::new_const());
-			self.token_lookup.push(0x8d);
-			return None;
-		}
-
-		let decode_map = match *self.token_lookup {
-			[0x8d, 0xc6] => token_data::TOKEN_MAP_C6,
-			[0x8d, 0xc7] => token_data::TOKEN_MAP_C7,
-			[0x8d, 0xc8] => token_data::TOKEN_MAP_C8,
-			[0x8d] if (0xc6..=0xc8).contains(&next_byte) => {
-				// indirect is still ongoing
-				self.token_lookup.push(next_byte);
+		let decode_map = match self.token_lookup {
+			Some(0xc6) => token_data::TOKEN_MAP_C6,
+			Some(0xc7) => token_data::TOKEN_MAP_C7,
+			Some(0xc8) => token_data::TOKEN_MAP_C8,
+			None if (0xc6..=0xc8).contains(&next_byte) => {
+				// indirect will finishe next round
+				self.token_lookup = Some(next_byte);
 				return None;
 			}
-			[] => token_data::TOKEN_MAP_DIRECT,
+			None => token_data::TOKEN_MAP_DIRECT,
 			_ => return queue_shift(self, next_byte),
 		};
 
 		// try lookup and conversion to token
+		self.token_lookup = None;
 		match decode_map.get(next_byte as usize).and_then(|&o| o) {
 			Some(s) => {
 				self.cur_token = s.chars();
-				self.token_lookup.clear();
 				None
 			},
 			None => {
 				// no match
-				let _8d = self.token_lookup.pop_at(0);
-				debug_assert!(_8d.unwrap_or(0x8d) == 0x8d, "_8d is actually {:02x?}", _8d);
 				queue_shift(self, next_byte)
 			}
 		}
@@ -328,42 +316,44 @@ mod test_parser {
 
 	#[test]
 	fn expand_pure_ascii() {
-		expand(10, b"hello", b"\x0d\x00\x0a\x05hello");
+		expand(10, b"hello", b"\x0d\x00\x0a\x09hello");
 	}
 
 	#[test]
 	fn expand_direct() {
-		expand(10, b"PRINT CHR$32", b"\x0d\x00\x0a\x05\xf1 \xbd32");
-		expand(10, b"PRINTCHR$32", b"\x0d\x00\x0a\x04\xf1\xbd32");
+		expand(10, b"PRINT CHR$32", b"\x0d\x00\x0a\x09\xf1 \xbd32");
+		expand(10, b"PRINTCHR$32", b"\x0d\x00\x0a\x08\xf1\xbd32");
 	}
 
 	#[test]
 	fn expand_indirect() {
-		expand(10, b"SYS87", b"\x0d\x00\x0a\x05\x8d\xc8\x1487");
+		expand(10, b"SYS87", b"\x0d\x00\x0a\x08\xc8\x1487");
 	}
 
 	#[test]
 	fn abandoned_indirects() {
-		expand(10, b"\x8d", &[13,0,10,1, 0x8d]);
-		expand(10, b"\x8d\xc7", &[13,0,10,2, 0x8d, 0xc7]);
+		expand(10, b"\xc7", &[13,0,10,5, 0xc7]);
+		// TODO check what RISC OS does here
+		//expand(10, b"\xc7AUTO", &[13,0,10,7, 0xc7, 0xc7, 2]);
 	}
 
 	#[test]
-	fn failed_direct() {
-		expand(1, b"\xc6", &[13,0,1,1, 0xc6]);
-		expand(1, b"\xc7", &[13,0,1,1, 0xc7]);
-		expand(1, b"\xc8", &[13,0,1,1, 0xc8]);
+	fn failed_indirect() {
+		expand(1, b"\xc6", &[13,0,1,5, 0xc6]);
+		expand(1, b"\xc7", &[13,0,1,5, 0xc7]);
+		expand(1, b"\xc8", &[13,0,1,5, 0xc8]);
 	}
 
 	#[test]
+	#[ignore]
 	fn interrupt_indirect_with_another() {
-		expand(0, b"\x8dSUM", &[13,0,0,4, 0x8d, 0x8d, 0xc6, 0x03]);
-		expand(0, b"\x8d\xc7SUM", &[13,0,0,5, 0x8d, 0xc7, 0x8d, 0xc6, 0x03]);
+		// TODO check what RISC OS does here, this case may be inherently invalid
+		expand(0, b"\xc7SUM", &[13,0,0,5, 0x8d, 0xc7, 0x8d, 0xc6, 0x03]);
 	}
 
 	#[test]
 	fn no_decode_in_string_literals() {
-		expand(1, b"LOAD \"\x8d\xc7\x18\"", b"\r\0\x01\x09\x8d\xc7\x18 \"\x8d\xc7\x18\"");
+		expand(1, b"LOAD \"\xc7\x18\"", b"\r\0\x01\x0b\xc7\x18 \"\xc7\x18\"");
 	}
 
 	#[test]
@@ -385,11 +375,11 @@ mod test_parser {
 		}
 
 		expand_multi(&[10, 20], &[b"line 1", b"line 2"],
-			b"\r\0\x0a\x06line 1\r\0\x14\x06line 2\r\xff");
+			b"\r\0\x0a\x0aline 1\r\0\x14\x0aline 2\r\xff");
 
 		expand_multi(&[], &[], b"\x0d\xff");
 
-		expand_multi(&[1], &[b"PRINT"], b"\r\0\x01\x01\xf1\r\xff");
+		expand_multi(&[1], &[b"PRINT"], b"\r\0\x01\x05\xf1\r\xff");
 	}
 }
 
