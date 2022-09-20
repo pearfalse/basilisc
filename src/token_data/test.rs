@@ -17,8 +17,8 @@ fn test_direct() {
 #[test]
 fn test_indirect() {
 	let data = [
-		(&TOKEN_MAP_C6, 0x02u8, "BEAT"),
-		(&TOKEN_MAP_C6, 0x03u8, "SUM"),
+		(&TOKEN_MAP_C6, 0x8eu8, "SUM"),
+		(&TOKEN_MAP_C6, 0x8fu8, "BEAT"),
 		(&TOKEN_MAP_C7, 0x8eu8, "APPEND"),
 		(&TOKEN_MAP_C7, 0x91u8, "DELETE"),
 		(&TOKEN_MAP_C8, 0x8eu8, "CASE"),

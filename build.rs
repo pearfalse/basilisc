@@ -203,8 +203,8 @@ static TOKEN_MAP_DIRECT: RawTokenMap = &[
 ];
 
 static TOKEN_MAP_C6: RawTokenMap = &[
-	(0x02, "BEAT"),
-	(0x03, "SUM"),
+	(0x8e, "SUM"),
+	(0x8f, "BEAT"),
 ];
 
 static TOKEN_MAP_C7: RawTokenMap = &[
