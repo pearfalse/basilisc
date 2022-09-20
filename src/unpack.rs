@@ -4,6 +4,7 @@ use std::io;
 
 use crate::{
 	support::*,
+	common::*,
 	token_data,
 	line_numbers,
 };
@@ -38,7 +39,7 @@ impl From<Infallible> for UnpackError {
 	}
 }
 
-
+type UnpackResult<T> = Result<T, UnpackError>;
 type TokenLookup = ArrayVec<u8, 2>;
 type LineNumberStage = ArrayVec<u8, 3>;
 
@@ -119,7 +120,14 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 		}
 	}
 
-	pub fn next_line(&mut self, buffer: &mut Vec<u8>) -> Result<Option<u16>, UnpackError> {
+	pub fn next_line(&mut self) -> UnpackResult<Option<Line>> {
+		let mut buffer = Vec::new();
+		self.next_line_raw(&mut buffer).map(|oln|
+			oln.map(|ln| Line::new_with_writer(ln, buffer))
+		)
+	}
+
+	fn next_line_raw(&mut self, buffer: &mut Vec<u8>) -> UnpackResult<Option<u16>> {
 		buffer.clear();
 		self.line_state = LineState::HaveNothing;
 
@@ -307,16 +315,14 @@ mod test_parser {
 
 	fn expand(line_number: u16, expected: &[u8], src: &[u8]) {
 		println!("\ncase: {:02x?}", expected);
-		let mut buf = Vec::new();
-		let result = expand_core(src).next_line(&mut buf);
-		assert_eq!(Ok(Some(line_number)), result);
-		assert_eq!(expected, &*buf);
+		let result = expand_core(src).next_line().unwrap();
+		assert_eq!(Some(line_number), result.as_ref().map(|line| line.line_number));
+		assert_eq!(expected, result.as_ref().map(|line| &**line).unwrap_or_default());
 	}
 
 	fn expand_err(expected: UnpackError, src: &[u8]) {
-		let mut buf = Vec::new();
-		let result = expand_core(src).next_line(&mut buf);
-		assert_eq!(Err(expected), result);
+		let result = expand_core(src).next_line();
+		assert_eq!(Some(expected), result.err());
 	}
 
 	#[test]
