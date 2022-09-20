@@ -120,11 +120,15 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 		}
 	}
 
-	pub fn next_line(&mut self) -> UnpackResult<Option<Line>> {
+	pub fn next_line(&mut self) -> UnpackResult<Option<Line<Box<[u8]>>>> {
 		let mut buffer = Vec::new();
-		self.next_line_raw(&mut buffer).map(|oln|
-			oln.map(|ln| Line::new_with_writer(ln, buffer))
-		)
+		let line_number = self.next_line_raw(&mut buffer)?;
+
+		Ok(line_number.map(|ln| {
+			let mut will_box = Vec::with_capacity(buffer.len());
+			will_box.extend_from_slice(&*buffer);
+			Line::new(ln, will_box.into_boxed_slice())
+		}))
 	}
 
 	fn next_line_raw(&mut self, buffer: &mut Vec<u8>) -> UnpackResult<Option<u16>> {
@@ -308,6 +312,8 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 mod test_parser {
 	use super::*;
 
+	use std::borrow::Borrow;
+
 	fn expand_core(src: &[u8]) -> Parser<impl NextByte<Error = core::convert::Infallible> + '_> {
 		let faux_io = InMemoryBytes(src.iter().copied());
 		Parser::new(faux_io)
@@ -317,7 +323,7 @@ mod test_parser {
 		println!("\ncase: {:02x?}", expected);
 		let result = expand_core(src).next_line().unwrap();
 		assert_eq!(Some(line_number), result.as_ref().map(|line| line.line_number));
-		assert_eq!(expected, result.as_ref().map(|line| &**line).unwrap_or_default());
+		assert_eq!(expected, result.as_ref().map(|line| &*line.data).unwrap_or_default());
 	}
 
 	fn expand_err(expected: UnpackError, src: &[u8]) {
@@ -363,6 +369,32 @@ mod test_parser {
 	#[test]
 	fn no_decode_in_string_literals() {
 		expand(1, b"LOAD \"\x8d\xc7\x18\"", b"\r\0\x01\x09\x8d\xc7\x18 \"\x8d\xc7\x18\"");
+	}
+
+	#[test]
+	fn multiline() {
+		fn expand_multi<const N: usize>(
+			line_numbers: &[u16; N],
+			expected: &[&[u8]; N],
+			src: &[u8],
+		) {
+			let mut parser = Parser::new(src);
+			for i in 0..N {
+				let line = parser.next_line().expect("unexpected parse failure");
+				assert_eq!(Some(line_numbers[i]), line.as_ref().map(|l| l.line_number));
+				assert_eq!(Some(expected[i]), line.as_ref().map(Borrow::<[u8]>::borrow));
+			}
+
+			assert_eq!(None, parser.next_line().expect("unexpected parse failure")
+				.map(|_| ()));
+		}
+
+		expand_multi(&[10, 20], &[b"line 1", b"line 2"],
+			b"\r\0\x0a\x06line 1\r\0\x14\x06line 2\r\xff");
+
+		expand_multi(&[], &[], b"\x0d\xff");
+
+		expand_multi(&[1], &[b"PRINT"], b"\r\0\x01\x01\xf1\r\xff");
 	}
 }
 

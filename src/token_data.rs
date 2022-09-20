@@ -540,13 +540,7 @@ mod test_unpack {
 
 
 
-	#[test]
-	#[ignore]
-	fn multiline() {
-		expand("10line 1\n20line 2\n", b"TJ@line 1\rTT@line 2");
-		expand("", b"");
-		expand("1PRINT\n", b"TA@\xf1\r");
-	}
+	
 
 	#[test]
 	#[ignore]
