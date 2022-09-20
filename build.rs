@@ -25,8 +25,10 @@ fn main() -> io::Result<()> {
 
 	gen_token_data.write_all(br#"// auto-generated
 
+use ascii::AsciiStr;
+
 type TokenDecodeMap = [Option<&'static ::ascii::AsciiStr>; 256];
-type TokenEncodeMap = phf::Map<&'static str, u8>;
+type _TokenEncodeMap = phf::Map<&'static str, u8>;
 
 "#)?;
 
