@@ -19,10 +19,10 @@ fn test_indirect() {
 	let data = [
 		(&TOKEN_MAP_C6, 0x02u8, "BEAT"),
 		(&TOKEN_MAP_C6, 0x03u8, "SUM"),
-		(&TOKEN_MAP_C7, 0x03u8, "APPEND"),
-		(&TOKEN_MAP_C7, 0x1cu8, "DELETE"),
-		(&TOKEN_MAP_C8, 0x03u8, "CASE"),
-		(&TOKEN_MAP_C8, 0x14u8, "SYS"),
+		(&TOKEN_MAP_C7, 0x8eu8, "APPEND"),
+		(&TOKEN_MAP_C7, 0x91u8, "DELETE"),
+		(&TOKEN_MAP_C8, 0x8eu8, "CASE"),
+		(&TOKEN_MAP_C8, 0x99u8, "SYS"),
 	];
 	for (arr, byte, word) in data.into_iter() {
 		assert_eq!(Some(word), arr[byte as usize].map(AsciiStr::as_str));

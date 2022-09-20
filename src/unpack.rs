@@ -327,7 +327,7 @@ mod test_parser {
 
 	#[test]
 	fn expand_indirect() {
-		expand(10, b"SYS87", b"\x0d\x00\x0a\x08\xc8\x1487");
+		expand(10, b"SYS87", b"\x0d\x00\x0a\x08\xc8\x9987");
 	}
 
 	#[test]
@@ -353,7 +353,7 @@ mod test_parser {
 
 	#[test]
 	fn no_decode_in_string_literals() {
-		expand(1, b"LOAD \"\xc7\x18\"", b"\r\0\x01\x0b\xc7\x18 \"\xc7\x18\"");
+		expand(1, b"LOAD \"\xc7\x95\"", b"\r\0\x01\x0b\xc7\x95 \"\xc7\x95\"");
 	}
 
 	#[test]
