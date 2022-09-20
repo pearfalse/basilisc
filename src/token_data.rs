@@ -556,22 +556,7 @@ mod test_unpack {
 				b"TJ@ \xf1 \"LOOK AROUND YOU \";\rTT@ \xe5 TJ@");
 	}
 
-	#[test]
-	#[ignore]
-	fn string_literals() {
-		// basic case
-		expand("1\"test\"\n", b"TA@\"test\"");
-		// escaped literal quote
-		expand("1\"A\"\"B\"\"\"\"C\"\n", b"TA@\"A\"\"B\"\"\"\"C\"");
-		// unterminated literal handled realtively gracefully
-		expand("1PRINT \"unclosed\n2END\n", b"TA@\xf1 \"unclosed\rTB@\xe0");
-	}
-
-	#[test]
-	#[ignore]
-	fn no_decode_in_string_literals() {
-		expand("1LOAD \"™Ç\u{2418}\"\n", b"TA@\x8d\xc7\x18 \"\x8d\xc7\x18\"")
-	}
+	
 
 	#[test]
 	#[ignore]

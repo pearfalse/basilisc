@@ -42,9 +42,10 @@ impl From<Infallible> for UnpackError {
 type TokenLookup = ArrayVec<u8, 2>;
 type LineNumberStage = ArrayVec<u8, 3>;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum LineState {
 	/// Not currently in a line
+	#[default]
 	HaveNothing,
 	/// The `0D` to mark a new line (or half the EOF marker) has been parsed
 	Have0D,
@@ -59,11 +60,13 @@ enum LineState {
 	},
 }
 
-impl Default for LineState {
-	#[inline]
-	fn default() -> Self {
-		Self::HaveNothing
-	}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum StringState {
+	#[default]
+	NotInString,
+	InString,
+	MaybeClosed,
 }
 
 
@@ -97,6 +100,8 @@ pub struct Parser<I> {
 	cur_token: ascii::Chars<'static>,
 	/// Have we reached the end of the BASIC file?
 	have_reached_end: bool,
+	/// Are we in a string literal? (if so, don't expand tokens)
+	string_state: StringState,
 }
 
 impl<I> Parser<I>
@@ -110,6 +115,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			byte_flush: ArrayVec::new_const(),
 			cur_token: <&'static AsciiStr>::default().chars(),
 			have_reached_end: false,
+			string_state: StringState::default(),
 		}
 	}
 
@@ -207,7 +213,24 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 
 			// TODO: LF literals should be passed straight through; what do we do about that?
 
-			if let Some(to_push) = self.update_lookup_stage(next_byte) {
+			let to_push = match (self.string_state, next_byte == b'"') {
+				(StringState::NotInString | StringState::MaybeClosed, true) => {
+					self.string_state = StringState::InString;
+					Some(next_byte)
+				},
+				(StringState::InString, true) => {
+					self.string_state = StringState::MaybeClosed;
+					Some(next_byte)
+				},
+				(StringState::NotInString | StringState::MaybeClosed, false) => {
+					self.string_state = StringState::NotInString;
+					self.update_lookup_stage(next_byte)
+				},
+				(StringState::InString, false)
+					=> Some(next_byte),
+				_ => self.update_lookup_stage(next_byte),
+			};
+			if let Some(to_push) = to_push {
 				buffer.push(to_push);
 				continue;
 			}
@@ -329,6 +352,11 @@ mod test_parser {
 	fn interrupt_indirect_with_another() {
 		expand(0, b"\x8dSUM", &[13,0,0,4, 0x8d, 0x8d, 0xc6, 0x03]);
 		expand(0, b"\x8d\xc7SUM", &[13,0,0,5, 0x8d, 0xc7, 0x8d, 0xc6, 0x03]);
+	}
+
+	#[test]
+	fn no_decode_in_string_literals() {
+		expand(1, b"LOAD \"\x8d\xc7\x18\"", b"\r\0\x01\x09\x8d\xc7\x18 \"\x8d\xc7\x18\"");
 	}
 }
 
