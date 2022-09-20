@@ -199,7 +199,11 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 						// EOF
 						None => return Err(UnpackError::UnexpectedEof),
 					};
-					self.line_state = LineState::InLine { line_number: lf, remaining_bytes: len };
+					self.line_state = LineState::InLine {
+						line_number: lf,
+						// the BASIC line header includes itself in its length
+						remaining_bytes: len.saturating_sub(4),
+					};
 					continue;
 				},
 				LineState::InLine { line_number, ref mut remaining_bytes }

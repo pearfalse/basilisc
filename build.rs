@@ -73,6 +73,7 @@ type TokenEncodeMap = phf::Map<&'static str, u8>;
 }
 
 static TOKEN_MAP_DIRECT: RawTokenMap = &[
+	(0x7f, "OTHERWISE"),
 	(0x80, "AND"),
 	(0x81, "DIV"),
 	(0x82, "EOR"),
