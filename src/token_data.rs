@@ -542,29 +542,11 @@ mod test_unpack {
 
 	
 
-	#[test]
-	#[ignore]
-	fn just_look_around_you() {
-		// TODO line number references don't work like this
-		expand("10 PRINT \"LOOK AROUND YOU \";\n20 GOTO 10\n",
-				b"TJ@ \xf1 \"LOOK AROUND YOU \";\rTT@ \xe5 TJ@");
-	}
+
 
 	
 
-	#[test]
-	#[ignore]
-	fn bad_line_number() {
-		expand_err(UnpackError::UnexpectedEof, b"T");
-		expand_err(UnpackError::UnexpectedEof, b"TJ");
-		expand_err(UnpackError::InvalidLineNumber, b"TJ\rTK@\r");
-	}
 
-	#[test]
-	#[ignore]
-	fn gosub() {
-		expand("1GOSUB2\n", b"TA@\xe4TB@\r");
-	}
 }
 
 include!(concat!(env!("OUT_DIR"), "/token_data.rs"));

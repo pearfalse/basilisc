@@ -21,6 +21,8 @@ pub enum UnpackError {
 	UnexpectedByte(u8),
 	#[error("io error: {0}")]
 	IoError(String),
+	#[error("invalid line number reference (found on line {found_on_line})")]
+	InvalidLineReference { found_on_line: u16 },
 }
 
 impl From<io::Error> for UnpackError {
@@ -380,6 +382,42 @@ mod test_parser {
 		expand_multi(&[], &[], b"\x0d\xff");
 
 		expand_multi(&[1], &[b"PRINT"], b"\r\0\x01\x05\xf1\r\xff");
+	}
+
+	#[test]
+	#[ignore]
+	fn just_look_around_you() {
+		let mut parser = Parser::new(
+			b"\r\0\x0a\x19\xf1 \"LOOK AROUND YOU \";\r\0\x14\x09\xe5 TJ@\r\xff"
+			.as_slice());
+
+		let mut expect_success = |line_number: u16, exp_data: &[u8]| {
+			let line = parser.next_line()
+				.expect("unexpected parse error")
+				.expect("unexpected parsed EOF");
+			assert_eq!(Line::new(line_number, exp_data), line);
+		};
+
+		expect_success(10, b"PRINT \"LOOK AROUND YOU \";");
+		expect_success(20, b"GOTO 10");
+		assert_eq!(Ok(None), parser.next_line());
+	}
+
+	#[test]
+	#[ignore]
+	fn goto_gosub() {
+		expand(1, b"GOTO 10\n", b"\r\0\x01\x0b\xe5TJ@\r");
+		expand(2, b"GOSUB20\n", b"\r\0\x02\x0b\xe4TT@\r");
+	}
+
+	#[test]
+	#[ignore]
+	fn bad_line_number() {
+		expand_err(UnpackError::UnexpectedEof, b"\r\0\x0a\x05T");
+		expand_err(UnpackError::UnexpectedEof, b"\r\0\x0a\x06TJ");
+		expand_err(
+			UnpackError::InvalidLineReference { found_on_line: 69 },
+			b"\r\0\x0a\x08\xe5\x18\0?");
 	}
 }
 

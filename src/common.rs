@@ -17,3 +17,12 @@ impl<S: Borrow<[u8]>> Borrow<[u8]> for Line<S> {
 		self.data.borrow()
 	}
 }
+
+impl<SA: Borrow<[u8]>, SB: Borrow<[u8]>> PartialEq<Line<SB>> for Line<SA> {
+	fn eq(&self, other: &Line<SB>) -> bool {
+		self.line_number == other.line_number
+		&& self.data.borrow() == other.data.borrow()
+	}
+}
+
+impl<SA: Borrow<[u8]>> Eq for Line<SA> { }
