@@ -95,6 +95,10 @@ pub struct Parser<I> {
 	have_reached_end: bool,
 	/// Are we in a string literal? (if so, don't expand tokens)
 	string_state: StringState,
+	/// Which lines exist?
+	extant_lines: PerLineBits,
+	/// Which lines are referenced?
+	referenced_lines: PerLineBits,
 }
 
 impl<I> Parser<I>
@@ -110,6 +114,8 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			cur_token: <&'static AsciiStr>::default().chars(),
 			have_reached_end: false,
 			string_state: StringState::default(),
+			extant_lines: PerLineBits::new(),
+			referenced_lines: PerLineBits::new(),
 		}
 	}
 
@@ -202,6 +208,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 						// the BASIC line header includes itself in its length
 						remaining_bytes: len.saturating_sub(4),
 					};
+					self.extant_lines.get_mut(lf).set();
 					continue;
 				},
 				LineState::InLine { line_number, ref mut remaining_bytes }
@@ -214,30 +221,10 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			let next_byte = nb.ok_or(UnpackError::UnexpectedEof)?;
 
 			// handle line number references
-			if let Some(ref mut ref_stage) = self.line_ref {
-				match **ref_stage {
-					[a, b] => {
-						// TODO full reference
-						let mut decoded = line_numbers::try_decode_riscos([a, b, next_byte])?;
-						debug_assert!(self.byte_flush.is_empty());
-
-						// stringify line reference
-						let mut stage = ArrayVec::<u8, 5>::new();
-						if decoded == 0 {
-							stage.push(0);
-						}
-						while decoded > 0 {
-							stage.push((decoded % 10) as u8 + b'0');
-							decoded /= 10;
-						}
-						stage.reverse();
-						self.byte_flush = stage;
-						self.line_ref = None;
-					},
-					_ => ref_stage.push(next_byte),
-				};
+			if self.update_line_ref(next_byte)? {
 				continue;
 			}
+
 			if next_byte == 0x8d {
 				self.line_ref = Some(LineNumberStage::new());
 				continue;
@@ -295,7 +282,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			Some(0xc7) => token_data::TOKEN_MAP_C7,
 			Some(0xc8) => token_data::TOKEN_MAP_C8,
 			None if (0xc6..=0xc8).contains(&next_byte) => {
-				// indirect will finishe next round
+				// indirect will finish next round
 				self.token_lookup = Some(next_byte);
 				return None;
 			}
@@ -316,7 +303,50 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			}
 		}
 	}
+
+	fn update_line_ref(&mut self, next_byte: u8) -> UnpackResult<bool> {
+		let ref_stage = match self.line_ref {
+			Some(ref mut stage) => stage,
+			None => return Ok(false)
+		};
+
+		match **ref_stage {
+			[a, b] => {
+				// TODO full reference
+				let mut decoded = line_numbers::try_decode_riscos([a, b, next_byte])?;
+				self.referenced_lines.get_mut(dbg!(decoded)).set();
+				debug_assert!(self.byte_flush.is_empty());
+
+				// stringify line reference
+				let mut stage = ArrayVec::<u8, 5>::new();
+				if decoded == 0 {
+					stage.push(0);
+				}
+				while decoded > 0 {
+					stage.push((decoded % 10) as u8 + b'0');
+					decoded /= 10;
+				}
+				stage.reverse();
+				self.byte_flush = stage;
+				self.line_ref = None;
+			},
+			_ => ref_stage.push(next_byte),
+		};
+
+		Ok(true)
+	}
 }
+
+trait U8Ext: core::cmp::Eq + core::cmp::PartialEq<u8> {
+	fn is_goto_or_gosub(&self) -> bool {
+		// impl assumes that LINE_DEPENDENT_KEYWORD_BYTES is 2 bytes wide
+		let [a, b] = token_data::LINE_DEPENDENT_KEYWORD_BYTES;
+		*self == a || *self == b
+	}
+}
+
+impl U8Ext for u8 {}
+
 
 #[cfg(test)]
 mod test_parser {
@@ -445,15 +475,27 @@ mod test_parser {
 		eprintln!("case 3");
 		expand_err(UnpackError::InvalidLineReference, b"\r\0\x0a\x09\xe5\x8d\x18\0?");
 	}
-}
 
-
-trait U8Ext: core::cmp::Eq + core::cmp::PartialEq<u8> {
-	fn is_goto_or_gosub(&self) -> bool {
-		// impl assumes that LINE_DEPENDENT_KEYWORD_BYTES is 2 bytes wide
-		let [a, b] = token_data::LINE_DEPENDENT_KEYWORD_BYTES;
-		*self == a || *self == b
+	#[test]
+	fn extant_referenced_lines() {
+		let mut sut = Parser::new([
+			13, 0, 10, 5,  0xf4,
+			13, 0, 20, 9,  0xe5, 0x8d, 0x54, 0x5e, 0x40,
+			13, 255
+		].as_slice());
+		let expected = [
+			(10, b"REM".as_slice()),
+			(20, b"GOTO30"),
+		];
+		for (line_number, content) in expected {
+			let line = sut.next_line().unwrap().unwrap();
+			assert_eq!(line_number, line.line_number);
+			assert_eq!(content, &*line.data, "got {:02x?}", &*line.data);
+		}
+		assert!(sut.extant_lines.get(10));
+		assert!(sut.extant_lines.get(20));
+		assert!(sut.referenced_lines.get(30));
+		assert!(!sut.extant_lines.get(1));
+		assert!(!sut.referenced_lines.get(20));
 	}
 }
-
-impl U8Ext for u8 {}
