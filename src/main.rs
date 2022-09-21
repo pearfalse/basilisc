@@ -51,11 +51,32 @@ struct UnpackArgs {
 	#[options(help = "output ASCII file")]
 	output_file: String,
 
-	#[options(help = "`true` to always output line numbers, `false` to reject code that requires them")]
-	force_line_numbers: Option<bool>,
+	#[options(help = "use of line numbers in output (minimal, always, forbid)",
+		default = "minimal",
+		parse(try_from_str = "UnpackLineNumbersOption::try_parse"),
+		)]
+	use_line_numbers: UnpackLineNumbersOption,
 
 	#[options(help = "show help for this command")]
 	help: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum UnpackLineNumbersOption {
+	Minimal,
+	AlwaysShow,
+	ForbidUse,
+}
+
+impl UnpackLineNumbersOption {
+	fn try_parse(input: &str) -> Result<Self, &'static str> {
+		match input {
+			"minimal" | "" => Ok(Self::Minimal),
+			"always" => Ok(Self::AlwaysShow),
+			"forbid" => Ok(Self::ForbidUse),
+			_ => Err("invalid value for force_line_numbers")
+		}
+	}
 }
 
 impl Command {
@@ -175,7 +196,21 @@ fn run_unpack(args: UnpackArgs) -> Result<(), unpack::UnpackError> {
 
 	let mut parser = unpack::Parser::new(input);
 	while let Some(line) = parser.next_line()? {
-		write!(output, "{:5} ", line.line_number)?;
+		match (args.use_line_numbers, parser.referenced_lines().get(line.line_number)) {
+			(UnpackLineNumbersOption::AlwaysShow, _) |
+			(UnpackLineNumbersOption::Minimal, true)
+				=> write!(output, "{:5} ", line.line_number)?,
+
+			(UnpackLineNumbersOption::Minimal, false)
+				=> output.write_all(&[32u8; 6][..])?,
+
+			(UnpackLineNumbersOption::ForbidUse, true)
+				=> return Err(UnpackError::DisallowedLineReference),
+
+			(UnpackLineNumbersOption::ForbidUse, false)
+				=> {},
+		};
+
 		let mut utf8_buf = [0u8; 4];
 		for latin1_byte in line.data.iter().copied() {
 			output.write_all(

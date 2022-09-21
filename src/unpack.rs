@@ -22,6 +22,8 @@ pub enum UnpackError {
 	IoError(String),
 	#[error("invalid line number reference")]
 	InvalidLineReference,
+	#[error("line reference found; rejecting program")]
+	DisallowedLineReference,
 }
 
 impl From<io::Error> for UnpackError {
@@ -118,6 +120,10 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			referenced_lines: PerLineBits::new(),
 		}
 	}
+
+	pub(crate) fn extant_lines(&self) -> &PerLineBits { &self.extant_lines }
+
+	pub(crate) fn referenced_lines(&self) -> &PerLineBits { &self.referenced_lines }
 
 	pub fn next_line(&mut self) -> UnpackResult<Option<Line>> {
 		self.buffer.clear();
