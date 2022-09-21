@@ -61,7 +61,7 @@ struct UnpackArgs {
 	help: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnpackLineNumbersOption {
 	Minimal,
 	AlwaysShow,
@@ -195,20 +195,31 @@ fn run_unpack(args: UnpackArgs) -> Result<(), unpack::UnpackError> {
 	};
 
 	let mut parser = unpack::Parser::new(input);
-	while let Some(line) = parser.next_line()? {
+	let lines = {
+		let mut v = Vec::new();
+		while let Some(line) = parser.next_line()? {
+			v.push(line);
+		}
+		v
+	};
+	let there_are_any_referenced_lines = parser.referenced_lines().any();
+	if there_are_any_referenced_lines
+		&& args.use_line_numbers == UnpackLineNumbersOption::ForbidUse
+	{
+		// TODO this should not be in UnpackError, really
+		return Err(UnpackError::DisallowedLineReference);
+	}
+
+	for line in lines {
 		match (args.use_line_numbers, parser.referenced_lines().get(line.line_number)) {
 			(UnpackLineNumbersOption::AlwaysShow, _) |
 			(UnpackLineNumbersOption::Minimal, true)
 				=> write!(output, "{:5} ", line.line_number)?,
 
-			(UnpackLineNumbersOption::Minimal, false)
+			(UnpackLineNumbersOption::Minimal, false) if there_are_any_referenced_lines
 				=> output.write_all(&[32u8; 6][..])?,
 
-			(UnpackLineNumbersOption::ForbidUse, true)
-				=> return Err(UnpackError::DisallowedLineReference),
-
-			(UnpackLineNumbersOption::ForbidUse, false)
-				=> {},
+			_ => {},
 		};
 
 		let mut utf8_buf = [0u8; 4];

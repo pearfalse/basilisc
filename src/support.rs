@@ -46,6 +46,10 @@ impl PerLineBits {
 		}
 	}
 
+	pub fn any(&self) -> bool {
+		self.store.iter().any(|&b| b != 0)
+	}
+
 	pub fn try_get(&self, index: u16) -> Option<bool> {
 		let (byte_idx, bit_mask) = Self::decompose(index);
 		self.store.get(byte_idx as usize).map(|r| *r & bit_mask != 0)
