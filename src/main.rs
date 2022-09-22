@@ -202,7 +202,8 @@ fn run_unpack(args: UnpackArgs) -> Result<(), unpack::UnpackError> {
 		}
 		v
 	};
-	let there_are_any_referenced_lines = parser.referenced_lines().any();
+	let there_are_any_referenced_lines = parser.referenced_lines().iter_set()
+		.next().is_some();
 	if there_are_any_referenced_lines
 		&& args.use_line_numbers == UnpackLineNumbersOption::ForbidUse
 	{
