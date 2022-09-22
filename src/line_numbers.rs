@@ -48,7 +48,6 @@ pub fn try_decode_riscos_from<I: Iterator<Item = u8>>(mut encoded: I)
 	try_decode_riscos([a, b, c])
 }
 
-// TODO this Ok path should be u16
 pub fn try_decode_riscos(encoded: Encoded) -> Result<u16, DecodeError> {
 
 	let a = encoded[0] as u32;

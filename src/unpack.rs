@@ -86,7 +86,7 @@ pub struct Parser<I> {
 	/// The state of parsing metdata about the current line
 	line_state: LineState,
 	/// Handles line references after GOTO/GOSUB statements
-	line_ref: Option<LineNumberStage>, // TODO
+	line_ref: Option<LineNumberStage>,
 	/// Buffer to fill the 1–2 bytes of a BBC BASIC token
 	token_lookup: TokenLookup,
 	/// Buffer for potential lookups that didn't match anything, or for format hacks
@@ -236,7 +236,6 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 				continue;
 			}
 
-			// TODO: LF literals should be passed straight through; what do we do about that?
 			let to_push = match (self.string_state, next_byte == b'"') {
 				(StringState::NotInString | StringState::MaybeClosed, true) => {
 					self.string_state = StringState::InString;
@@ -318,9 +317,8 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 
 		match **ref_stage {
 			[a, b] => {
-				// TODO full reference
 				let mut decoded = line_numbers::try_decode_riscos([a, b, next_byte])?;
-				self.referenced_lines.get_mut(dbg!(decoded)).set();
+				self.referenced_lines.get_mut(decoded).set();
 				debug_assert!(self.byte_flush.is_empty());
 
 				// stringify line reference
