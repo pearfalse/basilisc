@@ -22,8 +22,6 @@ pub enum UnpackError {
 	IoError(String),
 	#[error("invalid line number reference")]
 	InvalidLineReference,
-	#[error("line reference found; rejecting program")]
-	DisallowedLineReference,
 }
 
 impl From<io::Error> for UnpackError {

@@ -14,8 +14,6 @@ mod line_numbers;
 mod latin1;
 mod unpack;
 
-use unpack::UnpackError;
-
 #[derive(Debug, Options)]
 enum Command {
 
@@ -59,6 +57,20 @@ struct UnpackArgs {
 
 	#[options(help = "show help for this command")]
 	help: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+enum UnpackError {
+	#[error("{}", .0)]
+	Forwarded(unpack::UnpackError),
+	#[error("line reference found; rejecting program")]
+	DisallowedLineReference,
+}
+
+impl<T> From<T> for UnpackError where unpack::UnpackError: From<T> {
+	fn from(src: T) -> Self {
+		Self::Forwarded(src.into())
+	}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,7 +151,8 @@ fn main() {
 	let result : Result<(), (&dyn Error, ExitCode)> = match args {
 		Command::Unpack(args) => run_unpack(args).map_err(|e| {
 			let exit_code = match e {
-				UnpackError::UnexpectedEof | UnpackError::IoError(_) => ExitCode::IoError,
+				UnpackError::Forwarded(unpack::UnpackError::UnexpectedEof)
+				| UnpackError::Forwarded(unpack::UnpackError::IoError(_)) => ExitCode::IoError,
 				_ => ExitCode::InvalidData,
 			};
 
@@ -157,7 +170,7 @@ fn main() {
 	} else { ExitCode::Success.into() });
 }
 
-fn run_unpack(args: UnpackArgs) -> Result<(), unpack::UnpackError> {
+fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 	use crate::latin1::CharExt;
 
 	let stdin;
@@ -207,7 +220,6 @@ fn run_unpack(args: UnpackArgs) -> Result<(), unpack::UnpackError> {
 	if there_are_any_referenced_lines
 		&& args.use_line_numbers == UnpackLineNumbersOption::ForbidUse
 	{
-		// TODO this should not be in UnpackError, really
 		return Err(UnpackError::DisallowedLineReference);
 	}
 
