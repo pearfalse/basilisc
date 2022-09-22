@@ -268,43 +268,34 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 
 	fn update_lookup_stage(&mut self, next_byte: u8) -> Option<u8> {
 		debug_assert!(self.cur_token.as_str().is_empty());
-		debug_assert!(self.byte_flush.is_empty());
 
-		fn queue_shift<I>(this: &mut Parser<I>, next_byte: u8) -> Option<u8> {
-			this.byte_flush.clear();
-			if let old @ Some(_) = this.token_lookup.take() {
-				this.byte_flush.push(next_byte);
-				old
-			} else {
-				Some(next_byte)
-			}
-		}
-
-		let decode_map = match self.token_lookup {
-			Some(0xc6) => token_data::TOKEN_MAP_C6,
-			Some(0xc7) => token_data::TOKEN_MAP_C7,
-			Some(0xc8) => token_data::TOKEN_MAP_C8,
+		let (decode_map, byte_if_fail) = match self.token_lookup.take() {
+			Some(0xc6) => (token_data::TOKEN_MAP_C6, Some(0xc6)),
+			Some(0xc7) => (token_data::TOKEN_MAP_C7, Some(0xc7)),
+			Some(0xc8) => (token_data::TOKEN_MAP_C8, Some(0xc8)),
 			None if (0xc6..=0xc8).contains(&next_byte) => {
 				// indirect will finish next round
 				self.token_lookup = Some(next_byte);
 				return None;
-			}
-			None => token_data::TOKEN_MAP_DIRECT,
-			_ => return queue_shift(self, next_byte),
+			},
+			None => (token_data::TOKEN_MAP_DIRECT, None),
+			_ => return Some(next_byte),
 		};
 
 		// try lookup and conversion to token
-		self.token_lookup = None;
 		match decode_map.get(next_byte as usize).and_then(|&o| o) {
 			Some(s) => {
 				self.cur_token = s.chars();
-				None
 			},
 			None => {
 				// no match
-				queue_shift(self, next_byte)
+				debug_assert!(self.byte_flush.is_empty());
+				byte_if_fail.map(|b| self.byte_flush.push(b));
+				self.byte_flush.push(next_byte);
 			}
-		}
+		};
+
+		None // nothing to push in the caller
 	}
 
 	fn update_line_ref(&mut self, next_byte: u8) -> UnpackResult<bool> {
@@ -395,8 +386,6 @@ mod test_parser {
 	#[test]
 	fn abandoned_indirects() {
 		expand(10, b"\xc7", &[13,0,10,5, 0xc7]);
-		// TODO check what RISC OS does here
-		//expand(10, b"\xc7AUTO", &[13,0,10,7, 0xc7, 0xc7, 2]);
 	}
 
 	#[test]
@@ -406,11 +395,15 @@ mod test_parser {
 		expand(1, b"\xc8", &[13,0,1,5, 0xc8]);
 	}
 
-	#[test]
-	#[ignore]
+	#[test]	
 	fn interrupt_indirect_with_another() {
-		// TODO check what RISC OS does here, this case may be inherently invalid
-		expand(0, b"\xc7SUM", &[13,0,0,5, 0x8d, 0xc7, 0x8d, 0xc6, 0x03]);
+		// RISC OS behaviour with an invalid token reference is not consistent OS-wide:
+		// - BASIC rejects the line outright ("Syntax error")
+		// - !Edit skips over the invalid token
+		// - !Zap, prints the invalid token as its raw Latin-1 bytes
+		// We choose the 'preserve as-is' option here, given that basc-unpack's job is one of
+		//  round-trip preservation.
+		expand(0, b"\xc7\xc6PRINT", &[13,0,0,7, 0xc7, 0xc6, 0xf1]);
 	}
 
 	#[test]
