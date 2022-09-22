@@ -175,6 +175,15 @@ impl<'a, const S: bool> IterFiltered<'a, S> {
 	const fn skip_clue() -> u8 {
 		if S { 0x00 } else { 0xff }
 	}
+
+	#[inline(always)]
+	fn check_bit(byte: u8, idx: u8) -> bool {
+		if S {
+			byte & (1u8 << idx) != 0
+		} else {
+			byte & (1u8 << idx) == 0
+		}
+	}
 }
 
 impl<'a, const S: bool> Iterator for IterFiltered<'a, S> {
@@ -198,7 +207,7 @@ impl<'a, const S: bool> Iterator for IterFiltered<'a, S> {
 				// start with the bit pos we have, maybe break early
 
 				let test_bit_pos = Some((idx, self.bit_pos))
-					.filter(|(_, p)| byte & (1u8 << p) != 0);
+					.filter(|(_, p)| Self::check_bit(byte, *p));
 
 				// increment bit position for next time
 				let byte_done;
@@ -300,9 +309,24 @@ mod test_iter {
 
 		let mut sut = upper.iter_set();
 		for expect in [4, 6, 7, 8, 9, 10, 11, 0xfef8] {
-			let next = sut.next();
-			dbg!(next);
-			assert_eq!(Some(expect), next);
+			assert_eq!(Some(expect), sut.next());
+		}
+		assert_eq!(None, sut.next());
+	}
+
+	#[test]
+	fn iter_cleared() {
+		let mut upper = PerLineBits::new();
+		// pre-set all bits
+		for byte in &mut *upper.store {
+			*byte = 0xff;
+		}
+		upper.store[0] = 0b0111_1110;
+		upper.store[50] = 0b1110_0111;
+
+		let mut sut = upper.iter_clear();
+		for expect in [0, 7, 403, 404] {
+			assert_eq!(Some(expect), sut.next());
 		}
 		assert_eq!(None, sut.next());
 	}
