@@ -347,6 +347,18 @@ mod test_parser {
 
 	use std::borrow::Borrow;
 
+	#[derive(Debug)]
+	#[repr(transparent)]
+	pub(crate) struct InMemoryBytes<I: Iterator<Item = u8>>(pub I);
+
+	impl<I: Iterator<Item = u8>> NextByte for InMemoryBytes<I> {
+		type Error = Infallible;
+
+		fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
+			Ok(self.0.next())
+		}
+	}
+
 	fn expand_core(src: &[u8]) -> Parser<impl NextByte<Error = core::convert::Infallible> + '_> {
 		let faux_io = InMemoryBytes(src.iter().copied());
 		Parser::new(faux_io)
