@@ -45,9 +45,7 @@ use core::num::NonZeroU8;
 
 use crate::support::{Keyword, TokenIter};
 
-use ascii::AsciiStr;
-
-type TokenDecodeMap = [Option<&'static ::ascii::AsciiStr>; 256];
+type TokenDecodeMap = [Option<&'static [u8]>; 256];
 
 "#)?;
 
@@ -82,11 +80,7 @@ type TokenDecodeMap = [Option<&'static ::ascii::AsciiStr>; 256];
 		for maybe_val in flat_arr {
 			debug_assert!(maybe_val.map(str::is_ascii).unwrap_or(true));
 			match maybe_val {
-				Some(s) => writeln!(file, "\tSome(unsafe {{
-\t\t//SAFETY: this is transmuted from a fixed, all-ASCII byte string
-\t\t// (and we can't use an AsciiStr ctor in a const context)
-\t\t::core::mem::transmute::<&'static str, &'static AsciiStr>(\"{}\")
-\t}}),", s),
+				Some(s) => writeln!(file, "\tSome(b\"{}\"),", s),
 				None => writeln!(file, "\tNone,"),
 			}?;
 		}

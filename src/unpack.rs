@@ -1,4 +1,4 @@
-use core::convert::Infallible;
+use core::{convert::Infallible, slice};
 use std::io;
 
 use crate::{
@@ -9,7 +9,6 @@ use crate::{
 };
 
 use arrayvec::ArrayVec;
-use ascii::AsciiStr;
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -90,7 +89,7 @@ pub struct Parser<I> {
 	/// Buffer for potential lookups that didn't match anything, or for format hacks
 	byte_flush: ByteFlush,
 	/// Iterator for remaining characters of a previous lookup match
-	cur_token: ascii::Chars<'static>,
+	cur_token: slice::Iter<'static, u8>,
 	/// Have we reached the end of the BASIC file?
 	have_reached_end: bool,
 	/// Are we in a string literal? (if so, don't expand tokens)
@@ -111,7 +110,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			line_ref: None,
 			token_lookup: None,
 			byte_flush: ArrayVec::new_const(),
-			cur_token: <&'static AsciiStr>::default().chars(),
+			cur_token: <&'static [u8]>::default().iter(),
 			have_reached_end: false,
 			string_state: StringState::default(),
 			extant_lines: PerLineBits::new(),
@@ -134,8 +133,8 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 
 		let line_number = loop {
 			// check for existing token unpacks first
-			if let Some(byte) = self.cur_token.next() {
-				self.buffer.push(byte.as_byte());
+			if let Some(byte) = self.cur_token.next().copied() {
+				self.buffer.push(byte);
 				continue;
 			}
 
@@ -267,7 +266,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 	}
 
 	fn update_lookup_stage(&mut self, next_byte: u8) -> Option<u8> {
-		debug_assert!(self.cur_token.as_str().is_empty());
+		debug_assert!(self.cur_token.as_slice().is_empty());
 
 		let (decode_map, byte_if_fail) = match self.token_lookup.take() {
 			Some(0xc6) => (token_data::TOKEN_MAP_C6, Some(0xc6)),
@@ -285,7 +284,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 		// try lookup and conversion to token
 		match decode_map.get(next_byte as usize).and_then(|&o| o) {
 			Some(s) => {
-				self.cur_token = s.chars();
+				self.cur_token = s.iter();
 			},
 			None => {
 				// no match
