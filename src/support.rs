@@ -25,7 +25,7 @@ impl<I: io::Read> NextByte for I {
 #[path ="../meta-src"]
 mod meta_src {
 	mod keyword;
-	pub(crate) use keyword::Keyword;
+	pub(crate) use keyword::{RawKeyword, Keyword};
 	
 	mod token_iter;
 	pub(crate) use token_iter::TokenIter;

@@ -2,6 +2,7 @@ include!(concat!(env!("OUT_DIR"), "/token_data.rs"));
 
 #[cfg(test)]
 mod tests{
+	use crate::support::{Keyword, RawKeyword};
 	use super::{TOKEN_MAP_DIRECT, TOKEN_MAP_C6, TOKEN_MAP_C7, TOKEN_MAP_C8};
 
 	#[test]
@@ -12,9 +13,10 @@ mod tests{
 			(0xc5u8, "EOF"),
 		];
 		for (byte, word) in data.into_iter() {
-			assert_eq!(Some(word.as_bytes()), TOKEN_MAP_DIRECT[byte as usize]);
+			let kw = Keyword::try_new(TOKEN_MAP_DIRECT[byte as usize]);
+			assert_eq!(Some(word.as_bytes()), kw.as_ref().map(|k| k.as_ascii_str().as_bytes()));
 		}
-		assert_eq!(None, TOKEN_MAP_DIRECT[0x8d]);
+		assert_eq!(None, Keyword::try_new(TOKEN_MAP_DIRECT[0x8d]));
 	}
 
 	#[test]
@@ -28,15 +30,16 @@ mod tests{
 			(&TOKEN_MAP_C8, 0x99u8, "SYS"),
 		];
 		for (arr, byte, word) in data.into_iter() {
-			assert_eq!(Some(word.as_bytes()), arr[byte as usize]);
+			let kw = Keyword::try_new(arr[byte as usize]);
+			assert_eq!(Some(word.as_bytes()), kw.as_ref().map(|k| k.as_ascii_str().as_bytes()));
 		}
 	}
 
 	#[test]
 	fn proof_we_disallowed_empty_strings() {
-		fn all_str_lengths(table: &'static [Option<&'static [u8]>; 256])
+		fn all_str_lengths(table: &'static [RawKeyword; 256])
 			-> impl Iterator<Item = usize> {
-				table.iter().filter_map(|elem| *elem).map(<[u8]>::len)
+				table.iter().filter_map(|elem| Keyword::try_new(*elem)).map(|k| k.as_ascii_str().len())
 			}
 
 		assert!(all_str_lengths(&TOKEN_MAP_DIRECT)
@@ -50,9 +53,9 @@ mod tests{
 	fn check_flagged_goto_gosub() {
 		use super::LINE_DEPENDENT_KEYWORD_BYTES;
 		for keyword in ["GOTO", "GOSUB"] {
-			let byte = TOKEN_MAP_DIRECT.iter()
-				.map(Option::as_deref)
-				.position(|k| k == Some(keyword.as_bytes()))
+			let byte = TOKEN_MAP_DIRECT.iter().copied()
+				.map(Keyword::try_new)
+				.position(|mk| mk.as_ref().map(|k| k.as_bytes()) == Some(keyword.as_bytes()))
 				.and_then(|u| u8::try_from(u).ok())
 				.unwrap();
 			assert!(LINE_DEPENDENT_KEYWORD_BYTES.iter().find(|&&l| l == byte).is_some(),

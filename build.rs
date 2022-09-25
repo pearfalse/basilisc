@@ -18,12 +18,6 @@ use meta_src::*;
 
 type RawTokenMap = &'static [(u8, &'static str)];
 
-#[allow(dead_code)]
-fn ignore_dead_code_in_build_script_meta_modules() {
-	// Invoke code that is only used in the real crate
-	let _ = Keyword::new_unchecked(Default::default());
-}
-
 fn main() -> io::Result<()> {
 	// OUT_DIR
 	let out_dir = std::env::var_os("OUT_DIR").unwrap();
@@ -40,12 +34,12 @@ fn main() -> io::Result<()> {
 	// make the file
 	let mut gen_token_data = fs::File::create(out_dir.join("token_data.rs"))?;
 
-	gen_token_data.write_all(br#"// auto-generated
+	write!(gen_token_data, r#"// auto-generated
 use core::num::NonZeroU8;
 
-use crate::support::{Keyword, TokenIter};
+use crate::support::{{RawKeyword, Keyword, TokenIter}};
 
-type TokenDecodeMap = [Option<&'static [u8]>; 256];
+type TokenDecodeMap = [RawKeyword; 256];
 
 "#)?;
 
@@ -79,10 +73,11 @@ type TokenDecodeMap = [Option<&'static [u8]>; 256];
 		write!(file, "pub(crate) static {}: TokenDecodeMap = [\n", name)?;
 		for maybe_val in flat_arr {
 			debug_assert!(maybe_val.map(str::is_ascii).unwrap_or(true));
-			match maybe_val {
-				Some(s) => writeln!(file, "\tSome(b\"{}\"),", s),
-				None => writeln!(file, "\tNone,"),
-			}?;
+			let (raw_arr, comment_text) = match maybe_val {
+				Some(s) => (Keyword::new(s).as_array(), s),
+				None => (Default::default(), "<none>"),
+			};
+			writeln!(file, "\t{:?}, // {}", raw_arr, comment_text)?;
 		}
 		writeln!(file, "];\n")
 	}
@@ -110,10 +105,11 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 		}
 	}
 
-	writeln!(file, "pub(crate) static LOOKUP_MAP: [(Keyword, TokenIter); {}] = [", list.len())?;
+	writeln!(file, "pub(crate) static LOOKUP_MAP: [(Keyword<RawKeyword>, TokenIter); {}] = [", list.len())?;
 	for (keyword, value) in list {
 		writeln!(file, "\t( // {}", keyword.as_ascii_str().as_str())?;
-		writeln!(file, "\t\tKeyword::new_unchecked({:?}),", keyword.as_array())?;
+		writeln!(file, "\t\tunsafe {{ /* SAFETY: values checked at build time */ \
+Keyword::new_unchecked({:?}) }},", keyword.as_array())?;
 		writeln!(file, "\t\t{},", Codegen::from(value))?;
 		writeln!(file, "\t),")?;
 	}

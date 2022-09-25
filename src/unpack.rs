@@ -269,22 +269,22 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 		debug_assert!(self.cur_token.as_slice().is_empty());
 
 		let (decode_map, byte_if_fail) = match self.token_lookup.take() {
-			Some(0xc6) => (token_data::TOKEN_MAP_C6, Some(0xc6)),
-			Some(0xc7) => (token_data::TOKEN_MAP_C7, Some(0xc7)),
-			Some(0xc8) => (token_data::TOKEN_MAP_C8, Some(0xc8)),
+			Some(0xc6) => (&token_data::TOKEN_MAP_C6, Some(0xc6)),
+			Some(0xc7) => (&token_data::TOKEN_MAP_C7, Some(0xc7)),
+			Some(0xc8) => (&token_data::TOKEN_MAP_C8, Some(0xc8)),
 			None if (0xc6..=0xc8).contains(&next_byte) => {
 				// indirect will finish next round
 				self.token_lookup = Some(next_byte);
 				return None;
 			},
-			None => (token_data::TOKEN_MAP_DIRECT, None),
+			None => (&token_data::TOKEN_MAP_DIRECT, None),
 			_ => return Some(next_byte),
 		};
 
 		// try lookup and conversion to token
-		match decode_map.get(next_byte as usize).and_then(|&o| o) {
+		match decode_map.get(next_byte as usize).and_then(Keyword::try_new) {
 			Some(s) => {
-				self.cur_token = s.iter();
+				self.cur_token = s.as_bytes().iter();
 			},
 			None => {
 				// no match
