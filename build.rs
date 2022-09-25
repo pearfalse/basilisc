@@ -2,10 +2,27 @@ use std::{
 	fs,
 	io,
 	io::Write,
-	path::Path,
+	path::Path, num::NonZeroU8,
 };
 
+#[path = "meta-src"]
+mod meta_src {
+	mod keyword;
+	pub(super) use keyword::Keyword;
+
+	mod token_iter;
+	pub(super) use token_iter::{TokenIter, Codegen};
+}
+
+use meta_src::*;
+
 type RawTokenMap = &'static [(u8, &'static str)];
+
+#[allow(dead_code)]
+fn ignore_dead_code_in_build_script_meta_modules() {
+	// Invoke code that is only used in the real crate
+	let _ = Keyword::new_unchecked(Default::default());
+}
 
 fn main() -> io::Result<()> {
 	// OUT_DIR
@@ -24,11 +41,13 @@ fn main() -> io::Result<()> {
 	let mut gen_token_data = fs::File::create(out_dir.join("token_data.rs"))?;
 
 	gen_token_data.write_all(br#"// auto-generated
+use core::num::NonZeroU8;
+
+use crate::support::{Keyword, TokenIter};
 
 use ascii::AsciiStr;
 
 type TokenDecodeMap = [Option<&'static ::ascii::AsciiStr>; 256];
-type _TokenEncodeMap = phf::Map<&'static str, u8>;
 
 "#)?;
 
@@ -47,6 +66,7 @@ type _TokenEncodeMap = phf::Map<&'static str, u8>;
 
 
 	// TODO write parsing map
+	write_parse_map(&mut gen_token_data)?;
 
 
 	gen_token_data.sync_all()?;
@@ -72,6 +92,40 @@ type _TokenEncodeMap = phf::Map<&'static str, u8>;
 		}
 		writeln!(file, "];\n")
 	}
+}
+
+fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
+	let mut list = Vec::with_capacity(TOKEN_MAP_DIRECT.len()
+		+ TOKEN_MAP_C6.len() + TOKEN_MAP_C7.len() + TOKEN_MAP_C8.len());
+
+	let baked_prefix = [
+		(TOKEN_MAP_DIRECT, None),
+		(TOKEN_MAP_C6, NonZeroU8::new(0xc6)),
+		(TOKEN_MAP_C7, NonZeroU8::new(0xc7)),
+		(TOKEN_MAP_C8, NonZeroU8::new(0xc8)),
+	];
+
+	for (array, prefix) in baked_prefix {
+		for (value, string) in array.iter().copied() {
+			let value = NonZeroU8::new(value).unwrap();
+			list.push((Keyword::new(string), if let Some(prefix) = prefix {
+				TokenIter::new_indirect(prefix, value)
+			} else {
+				TokenIter::new_direct(value)
+			}));
+		}
+	}
+
+	writeln!(file, "pub(crate) static LOOKUP_MAP: [(Keyword, TokenIter); {}] = [", list.len())?;
+	for (keyword, value) in list {
+		writeln!(file, "\t( // {}", keyword.as_ascii_str().as_str())?;
+		writeln!(file, "\t\tKeyword::new_unchecked({:?}),", keyword.as_array())?;
+		writeln!(file, "\t\t{},", Codegen::from(value))?;
+		writeln!(file, "\t),")?;
+	}
+	writeln!(file, "];")?;
+
+	Ok(())
 }
 
 static TOKEN_MAP_DIRECT: RawTokenMap = &[

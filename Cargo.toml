@@ -7,13 +7,13 @@ authors = ["Simon Harris <simon@pearfalse.com>"]
 [dependencies]
 gumdrop = "0.8"
 ascii = "1.0"
-arrayvec = "0.7.2"
+arrayvec = "0.7"
 thiserror = "1.0"
-phf = "0.11"
 
 [profile.release]
 lto = true
 codegen-units = 1
 
-[dev-dependencies]
-phf_codegen = "0.11"
+[build-dependencies]
+arrayvec = "0.7"
+ascii = "1.0"

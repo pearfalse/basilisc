@@ -1,4 +1,3 @@
-use core::convert::Infallible;
 use std::io;
 
 mod per_line_bits;
@@ -21,3 +20,14 @@ impl<I: io::Read> NextByte for I {
 		}
 	}
 }
+
+// include meta-src files that we want
+#[path ="../meta-src"]
+mod meta_src {
+	mod keyword;
+	pub(crate) use keyword::Keyword;
+	
+	mod token_iter;
+	pub(crate) use token_iter::TokenIter;
+}
+pub(crate) use meta_src::*;
