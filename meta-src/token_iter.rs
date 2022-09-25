@@ -1,6 +1,7 @@
 use core::num::NonZeroU8;
 use std::fmt;
 
+/// An interator optimised for yielding a BBC BASIC token.
 #[derive(Debug, Clone)]
 pub(crate) struct TokenIter {
 	a: Option<NonZeroU8>,
@@ -8,6 +9,7 @@ pub(crate) struct TokenIter {
 }
 
 impl TokenIter {
+	/// Creates a new `TokenIter` for a direct (1-byte) token.
 	pub(crate) const fn new_direct(value: NonZeroU8) -> Self {
 		Self {
 			a: Some(value),
@@ -15,6 +17,7 @@ impl TokenIter {
 		}
 	}
 
+	/// Creates a new `TokenIter` for an indirect (2-byte) token.
 	pub(crate) const fn new_indirect(prefix: NonZeroU8, value: NonZeroU8) -> Self {
 		Self {
 			a: Some(prefix),
@@ -23,6 +26,9 @@ impl TokenIter {
 	}
 }
 
+/// A wrapper for `TokenIter` whose [`Display`][1] impl will output Rust code to construct the
+/// inner value. Designed for build scripts only.
+/// [1]: https://doc.rust-lang.org/stable/std/fmt/trait.Display.html
 pub(crate) struct Codegen(TokenIter);
 
 impl From<TokenIter> for Codegen {
@@ -55,6 +61,10 @@ impl fmt::Display for Codegen {
 	}
 }
 
+/// A support struct for [`Codegen`], handling a statically verified call to
+/// [`new_unchecked`][1].
+///
+/// [1]: https://doc.rust-lang.org/stable/core/num/struct.NonZeroU8.html#method.new_unchecked
 struct NZu8Codegen(NonZeroU8);
 
 impl fmt::Display for NZu8Codegen {
