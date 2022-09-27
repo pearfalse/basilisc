@@ -28,6 +28,7 @@ impl TokenIter {
 
 /// A wrapper for `TokenIter` whose [`Display`][1] impl will output Rust code to construct the
 /// inner value. Designed for build scripts only.
+///
 /// [1]: https://doc.rust-lang.org/stable/std/fmt/trait.Display.html
 pub(crate) struct Codegen(TokenIter);
 

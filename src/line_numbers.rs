@@ -5,7 +5,7 @@
 //!
 //! The line number format consists of a 0x8d byte, followed by three bytes that encode the line
 //! reference. The extra redundancy in this encoding is used to keep all three bytes with the range
-//! of printable ASCII characters.
+//! of printable, non-numeric ASCII characters.
 //!
 //! Given three source bytes `A` `B` `C`, and a final line number `F`, the decoding process looks
 //! like this:
@@ -19,8 +19,8 @@
 //! The encoding process is the direct inverse of this, although for full correctness, any final
 //! bytes between `0x00` and `0x3e` should be OR'd with `0x40`. `0x0d` must be avoided.
 //!
-//! [https://web.archive.org/web/20081203145001/www.nelsonit.net/~jon/BBCMicro/2005/06/27/165311.html],
-//! via [https://xania.org/200711/bbc-basic-line-number-format]
+//! [^1]: <https://web.archive.org/web/20081203145001/www.nelsonit.net/~jon/BBCMicro/2005/06/27/165311.html>,
+//! via <https://xania.org/200711/bbc-basic-line-number-format>
 
 use thiserror::Error;
 

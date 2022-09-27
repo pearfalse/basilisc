@@ -71,13 +71,13 @@ type TokenDecodeMap = [RawKeyword; 256];
 		}
 
 		write!(file, "pub(crate) static {}: TokenDecodeMap = [\n", name)?;
-		for maybe_val in flat_arr {
+		for (i, maybe_val) in flat_arr.into_iter().enumerate() {
 			debug_assert!(maybe_val.map(str::is_ascii).unwrap_or(true));
 			let (raw_arr, comment_text) = match maybe_val {
 				Some(s) => (Keyword::new(s).as_array(), s),
 				None => (Default::default(), "<none>"),
 			};
-			writeln!(file, "\t{:?}, // {}", raw_arr, comment_text)?;
+			writeln!(file, "\t{:?}, // {:02X} = {}", raw_arr, i, comment_text)?;
 		}
 		writeln!(file, "];\n")
 	}
