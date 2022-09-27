@@ -28,28 +28,11 @@ pub type Encoded = [u8; 3];
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum DecodeError {
-	#[error("unexpected end of file (required 3 bytes to decode)")]
-	Eof,
 	#[error("out of range (decoded value was &{0:x}, but must be < &ff00")]
 	OutOfRange(u32),
 }
 
-pub fn try_decode_riscos_from<I: Iterator<Item = u8>>(mut encoded: I)
--> Result<u16, DecodeError> {
-	let mut try_next = move || match encoded.next() {
-		Some(i) => Ok(i),
-		None => Err(DecodeError::Eof)
-	};
-
-	let a = try_next()?;
-	let b = try_next()?;
-	let c = try_next()?;
-
-	try_decode_riscos([a, b, c])
-}
-
-pub fn try_decode_riscos(encoded: Encoded) -> Result<u16, DecodeError> {
-
+pub fn try_decode(encoded: Encoded) -> Result<u16, DecodeError> {
 	let a = encoded[0] as u32;
 	let b = encoded[1] as u32;
 	let c = encoded[2] as u32;
@@ -102,19 +85,7 @@ mod test_decode {
 			([b'(', b'?', b'>'], 0xfeff),
 		];
 		for (data, expected) in data_cases {
-			assert_eq!(Ok(expected), try_decode_riscos(data));
-		}
-	}
-
-	#[test]
-	fn err_too_short() {
-		let data_cases = [
-			&[][..],
-			&[0x40],
-			&[0x40, 0x50],
-		];
-		for data in data_cases {
-			assert_eq!(Err(DecodeError::Eof), try_decode_riscos_from(data.iter().copied()));
+			assert_eq!(Ok(expected), try_decode(data));
 		}
 	}
 
@@ -131,7 +102,7 @@ mod test_decode {
 		];
 
 		for (data, expected) in data_cases {
-			match try_decode_riscos(data) {
+			match try_decode(data) {
 				Err(DecodeError::OutOfRange(e)) if e == expected => expected,
 				Err(DecodeError::OutOfRange(other)) =>
 					panic!("unexpected OOR number (expected &{0:05x}, got &{1:05x}",

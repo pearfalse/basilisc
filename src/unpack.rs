@@ -305,7 +305,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 
 		match **ref_stage {
 			[a, b] => {
-				let mut decoded = line_numbers::try_decode_riscos([a, b, next_byte])?;
+				let mut decoded = line_numbers::try_decode([a, b, next_byte])?;
 				self.referenced_lines.get_mut(decoded).set();
 				debug_assert!(self.byte_flush.is_empty());
 
