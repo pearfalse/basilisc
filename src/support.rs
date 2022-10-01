@@ -22,10 +22,9 @@ impl<I: io::Read> NextByte for I {
 }
 
 // include meta-src files that we want
-#[path = "../meta-src/keyword.rs"]
-mod keyword;
+#[path = "../meta-src/keyword.rs"] mod keyword;
+#[path = "../meta-src/token_iter.rs"] mod token_iter;
+#[path = "../meta-src/subarray.rs"] mod subarray;
+
 pub(crate) use keyword::{RawKeyword, Keyword};
-	
-#[path = "../meta-src/token_iter.rs"]
-mod token_iter;
 pub(crate) use token_iter::TokenIter;
