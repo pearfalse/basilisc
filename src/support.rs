@@ -28,3 +28,4 @@ impl<I: io::Read> NextByte for I {
 
 pub(crate) use keyword::{RawKeyword, Keyword};
 pub(crate) use token_iter::TokenIter;
+pub(crate) use subarray::SubArray;

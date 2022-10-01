@@ -1,4 +1,4 @@
-use std::{ops::{Index, IndexMut}, num::NonZeroUsize};
+use std::{ops::Index, num::NonZeroUsize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubArray<'a, T> {

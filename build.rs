@@ -14,6 +14,10 @@ mod meta_src {
 	pub(super) use token_iter::{TokenIter, Codegen};
 }
 
+#[allow(dead_code)]
+fn dead_code_build_rs_exemptions() {
+}
+
 use meta_src::*;
 
 type RawTokenMap = &'static [(u8, &'static str)];
@@ -37,9 +41,9 @@ fn main() -> io::Result<()> {
 	write!(gen_token_data, r#"// auto-generated
 use core::num::NonZeroU8;
 
-use crate::support::{{RawKeyword, Keyword, TokenIter}};
+use crate::support::{{RawKeyword, Keyword, TokenIter, SubArray}};
 
-type TokenDecodeMap = [RawKeyword; 256];
+type TokenDecodeMap = SubArray<'static, RawKeyword>;
 
 "#)?;
 
@@ -65,21 +69,39 @@ type TokenDecodeMap = [RawKeyword; 256];
 	return Ok(());
 
 	fn _write_array(file: &mut fs::File, arr: RawTokenMap, name: &'static str) -> io::Result<()> {
+		fn reduce_front<T: Copy>(mut slice: &[Option<T>]) -> (&[Option<T>], usize) {
+			let mut from = 0usize;
+			while let Some((None, x)) = slice.split_first() {
+				slice = x;
+				from += 1;
+			}
+			(slice, from)
+		}
+		fn reduce_back<T: Copy>(mut slice: &[Option<T>]) -> &[Option<T>] {
+			while let Some((None, x)) = slice.split_last() {
+				slice = x;
+			}
+			slice
+		}
+
 		let mut flat_arr: [Option<&'static str>; 256] = [None; 256];
 		for &(byte, val) in arr {
 			flat_arr[byte as usize] = Some(val);
 		}
 
-		write!(file, "pub(crate) static {}: TokenDecodeMap = [\n", name)?;
-		for (i, maybe_val) in flat_arr.into_iter().enumerate() {
+		let (flat_arr, from) = reduce_front(&mut flat_arr[..]);
+		let flat_arr = reduce_back(flat_arr);
+
+		writeln!(file, "pub(crate) static {}: TokenDecodeMap = TokenDecodeMap::new(&[", name)?;
+		for (i, maybe_val) in flat_arr.iter().copied().enumerate() {
 			debug_assert!(maybe_val.map(str::is_ascii).unwrap_or(true));
 			let (raw_arr, comment_text) = match maybe_val {
 				Some(s) => (Keyword::new(s).as_array(), s),
 				None => (Default::default(), "<none>"),
 			};
-			writeln!(file, "\t{:?}, // {:02X} = {}", raw_arr, i, comment_text)?;
+			writeln!(file, "\t{:?}, // {:02X} = {}", raw_arr, i + from, comment_text)?;
 		}
-		writeln!(file, "];\n")
+		writeln!(file, "], {});\n", from)
 	}
 }
 

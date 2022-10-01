@@ -2,7 +2,7 @@ include!(concat!(env!("OUT_DIR"), "/token_data.rs"));
 
 #[cfg(test)]
 mod tests{
-	use crate::support::{Keyword, RawKeyword};
+	use crate::support::{Keyword, RawKeyword, SubArray};
 	use super::{TOKEN_MAP_DIRECT, TOKEN_MAP_C6, TOKEN_MAP_C7, TOKEN_MAP_C8};
 
 	#[test]
@@ -37,9 +37,11 @@ mod tests{
 
 	#[test]
 	fn proof_we_disallowed_empty_strings() {
-		fn all_str_lengths(table: &'static [RawKeyword; 256])
+		fn all_str_lengths(table: &SubArray<'static, RawKeyword>)
 			-> impl Iterator<Item = usize> {
-				table.iter().filter_map(|elem| Keyword::try_new(*elem)).map(|k| k.as_ascii_str().len())
+				table.raw_slice().iter()
+					.filter_map(|elem| Keyword::try_new(*elem))
+					.map(|k| k.as_ascii_str().len())
 			}
 
 		assert!(all_str_lengths(&TOKEN_MAP_DIRECT)
@@ -53,13 +55,13 @@ mod tests{
 	fn check_flagged_goto_gosub() {
 		use super::LINE_DEPENDENT_KEYWORD_BYTES;
 		for keyword in ["GOTO", "GOSUB"] {
-			let byte = TOKEN_MAP_DIRECT.iter().copied()
+			let byte = TOKEN_MAP_DIRECT.full_iter()
 				.map(Keyword::try_new)
 				.position(|mk| mk.as_ref().map(|k| k.as_bytes()) == Some(keyword.as_bytes()))
 				.and_then(|u| u8::try_from(u).ok())
 				.unwrap();
 			assert!(LINE_DEPENDENT_KEYWORD_BYTES.iter().find(|&&l| l == byte).is_some(),
-				"could not find {} byte equiv ({:02x}) in LINE_DEPENDENT_KEYWORD_BYTES ({:?})",
+				"could not find {} byte equiv ({:02x}) in LINE_DEPENDENT_KEYWORD_BYTES ({:02x?})",
 				keyword, byte, LINE_DEPENDENT_KEYWORD_BYTES);
 		}
 	}
