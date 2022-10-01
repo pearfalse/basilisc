@@ -4,7 +4,7 @@ use std::borrow::Borrow;
 
 use ascii::AsciiStr;
 
-const MAX_LEN: usize = 9;
+const MAX_LEN: usize = 12;
 
 /// The raw storage for a keyword.
 pub(crate) type RawKeyword = [u8; MAX_LEN];
@@ -134,20 +134,20 @@ mod tests {
 
 	#[test]
 	fn as_array() {
-		let k = Keyword::new("ABCDEFGH");
-		assert_eq!([65,66,67,68,69,70,71,72,0], k.as_array());
+		let k = Keyword::new("ABCDEFGHIJ");
+		assert_eq!([65,66,67,68,69,70,71,72,73,74,0,0], k.as_array());
 	}
 	
 	#[test]
 	fn try_new() {
-		assert!(Keyword::try_new([40,40,40,0,0,0,0,0,0]).is_some());
+		assert!(Keyword::try_new([40,40,40,0,0,0,0,0,0,0,0,0]).is_some());
 		assert!(Keyword::try_new(RawKeyword::default()).is_none());
 	}
 
 	#[test]
 	#[should_panic]
 	fn fail_too_long() {
-		let _ = Keyword::new("ASCIIstring");
+		let _ = Keyword::new("ASCIIstring??");
 	}
 
 	#[test]
