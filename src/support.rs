@@ -26,6 +26,6 @@ impl<I: io::Read> NextByte for I {
 #[path = "../meta-src/token_iter.rs"] mod token_iter;
 #[path = "../meta-src/subarray.rs"] mod subarray;
 
-pub(crate) use keyword::{RawKeyword, Keyword};
+pub(crate) use keyword::{RawKeyword, Keyword, IntoIter as KeywordIntoIter};
 pub(crate) use token_iter::TokenIter;
 pub(crate) use subarray::SubArray;

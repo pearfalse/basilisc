@@ -94,9 +94,10 @@ type TokenDecodeMap = SubArray<'static, RawKeyword>;
 
 		writeln!(file, "pub(crate) static {}: TokenDecodeMap = TokenDecodeMap::new(&[", name)?;
 		for (i, maybe_val) in flat_arr.iter().copied().enumerate() {
+			// assert string (if present) is ascii
 			debug_assert!(maybe_val.map(str::is_ascii).unwrap_or(true));
 			let (raw_arr, comment_text) = match maybe_val {
-				Some(s) => (Keyword::new(s).as_array(), s),
+				Some(s) => (Keyword::try_from(s).unwrap().as_array(), s),
 				None => (Default::default(), "<none>"),
 			};
 			writeln!(file, "\t{:?}, // {:02X} = {}", raw_arr, i + from, comment_text)?;
@@ -119,7 +120,7 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 	for (array, prefix) in baked_prefix {
 		for (value, string) in array.iter().copied() {
 			let value = NonZeroU8::new(value).unwrap();
-			list.push((Keyword::new(string), if let Some(prefix) = prefix {
+			list.push((Keyword::try_from(string).unwrap(), if let Some(prefix) = prefix {
 				TokenIter::new_indirect(prefix, value)
 			} else {
 				TokenIter::new_direct(value)
@@ -127,15 +128,19 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 		}
 	}
 
-	writeln!(file, "pub(crate) static LOOKUP_MAP: [(Keyword<RawKeyword>, TokenIter); {}] = [", list.len())?;
+	writeln!(file, "// SAFETY: values are generated from the same parsed type at build time")?;
+	writeln!(file,
+		"pub(crate) static LOOKUP_MAP: [(Keyword, TokenIter); {}] = unsafe {{[",
+		list.len(),
+	)?;
+
 	for (keyword, value) in list {
 		writeln!(file, "\t( // {}", keyword.as_ascii_str().as_str())?;
-		writeln!(file, "\t\tunsafe {{ /* SAFETY: values checked at build time */ \
-Keyword::new_unchecked({:?}) }},", keyword.as_array())?;
-		writeln!(file, "\t\t{},", Codegen::from(value))?;
+		writeln!(file, "\t\tKeyword::new_unchecked({:?}),", keyword.as_array())?;
+		writeln!(file, "\t\t{},", Codegen::from(value, false))?;
 		writeln!(file, "\t),")?;
 	}
-	writeln!(file, "];")?;
+	writeln!(file, "]}};")?;
 
 	Ok(())
 }

@@ -30,21 +30,28 @@ impl TokenIter {
 /// inner value. Designed for build scripts only.
 ///
 /// [1]: https://doc.rust-lang.org/stable/std/fmt/trait.Display.html
-pub(crate) struct Codegen(TokenIter);
+pub(crate) struct Codegen {
+	iter: TokenIter,
+	add_unsafe_blocks: bool,
+}
 
-impl From<TokenIter> for Codegen {
-	fn from(src: TokenIter) -> Self {
-		Self(src)
+impl Codegen {
+	fn get_num(&self, field: Option<NonZeroU8>) -> Result<NZu8Codegen, fmt::Error> {
+		field.map(|n| NZu8Codegen {
+			value: n,
+			add_unsafe_block: self.add_unsafe_blocks
+		}).ok_or(fmt::Error)
+	}
+
+	pub(crate) fn from(iter: TokenIter, add_unsafe_blocks: bool) -> Self {
+		Self { iter, add_unsafe_blocks }
 	}
 }
 
 impl fmt::Display for Codegen {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		fn get_num(field: Option<NonZeroU8>) -> Result<NZu8Codegen, fmt::Error> {
-			field.map(NZu8Codegen).ok_or(fmt::Error)
-		}
 
-		let is_indirect = self.0.b.is_some();
+		let is_indirect = self.iter.b.is_some();
 		write!(f, "TokenIter::{}(", if is_indirect {
 			stringify!(new_indirect)
 		} else {
@@ -53,9 +60,9 @@ impl fmt::Display for Codegen {
 
 		if is_indirect {
 			write!(f, "{}, {}",
-				get_num(self.0.a)?, get_num(self.0.b)?)?;
+				self.get_num(self.iter.a)?, self.get_num(self.iter.b)?)?;
 		} else {
-			write!(f, "{}", get_num(self.0.a)?)?;
+			write!(f, "{}", self.get_num(self.iter.a)?)?;
 		}
 
 		write!(f, ")")
@@ -66,14 +73,22 @@ impl fmt::Display for Codegen {
 /// [`new_unchecked`][1].
 ///
 /// [1]: https://doc.rust-lang.org/stable/core/num/struct.NonZeroU8.html#method.new_unchecked
-struct NZu8Codegen(NonZeroU8);
+struct NZu8Codegen {
+	value: NonZeroU8,
+	add_unsafe_block: bool,
+}
 
 impl fmt::Display for NZu8Codegen {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "unsafe {{ \
-/* SAFETY: value generated and checked at build time */ \
-NonZeroU8::new_unchecked({}) }}",
-			self.0)
+		if self.add_unsafe_block {
+			f.write_str("unsafe { /* SAFETY: value generated and checked at build time */ ")?;
+		}
+		write!(f, "NonZeroU8::new_unchecked({})", self.value)?;
+		if self.add_unsafe_block {
+			f.write_str(" }")?;
+		}
+
+		Ok(())
 	}
 }
 

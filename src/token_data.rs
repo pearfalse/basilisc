@@ -14,9 +14,9 @@ mod tests{
 		];
 		for (byte, word) in data.into_iter() {
 			let kw = Keyword::try_new(TOKEN_MAP_DIRECT[byte as usize]);
-			assert_eq!(Some(word.as_bytes()), kw.as_ref().map(|k| k.as_ascii_str().as_bytes()));
+			assert_eq!(Ok(word.as_bytes()), kw.as_ref().map(|k| k.as_ascii_str().as_bytes()));
 		}
-		assert_eq!(None, Keyword::try_new(TOKEN_MAP_DIRECT[0x8d]));
+		assert_eq!(Err(TOKEN_MAP_DIRECT[0x8d]), Keyword::try_new(TOKEN_MAP_DIRECT[0x8d]));
 	}
 
 	#[test]
@@ -31,7 +31,7 @@ mod tests{
 		];
 		for (arr, byte, word) in data.into_iter() {
 			let kw = Keyword::try_new(arr[byte as usize]);
-			assert_eq!(Some(word.as_bytes()), kw.as_ref().map(|k| k.as_ascii_str().as_bytes()));
+			assert_eq!(Ok(word.as_bytes()), kw.as_ref().map(|k| k.as_ascii_str().as_bytes()));
 		}
 	}
 
@@ -40,7 +40,7 @@ mod tests{
 		fn all_str_lengths(table: &SubArray<'static, RawKeyword>)
 			-> impl Iterator<Item = usize> {
 				table.raw_slice().iter()
-					.filter_map(|elem| Keyword::try_new(*elem))
+					.filter_map(|elem| Keyword::try_new(*elem).ok())
 					.map(|k| k.as_ascii_str().len())
 			}
 
@@ -56,7 +56,7 @@ mod tests{
 		use super::LINE_DEPENDENT_KEYWORD_BYTES;
 		for keyword in ["GOTO", "GOSUB"] {
 			let byte = TOKEN_MAP_DIRECT.full_iter()
-				.map(Keyword::try_new)
+				.map(|bytes| Keyword::try_new(bytes).ok())
 				.position(|mk| mk.as_ref().map(|k| k.as_bytes()) == Some(keyword.as_bytes()))
 				.and_then(|u| u8::try_from(u).ok())
 				.unwrap();
