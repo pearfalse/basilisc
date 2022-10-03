@@ -1,4 +1,4 @@
-use core::{convert::Infallible, slice};
+use core::convert::Infallible;
 use std::io;
 
 use crate::{

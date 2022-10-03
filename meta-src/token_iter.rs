@@ -43,6 +43,7 @@ impl Codegen {
 		}).ok_or(fmt::Error)
 	}
 
+	#[allow(dead_code)] // not really dead code, it's used in build script
 	pub(crate) fn from(iter: TokenIter, add_unsafe_blocks: bool) -> Self {
 		Self { iter, add_unsafe_blocks }
 	}
