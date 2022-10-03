@@ -102,7 +102,7 @@ type TokenDecodeMap = SubArray<'static, RawKeyword>;
 			};
 			writeln!(file, "\t{:?}, // {:02X} = {}", raw_arr, i + from, comment_text)?;
 		}
-		writeln!(file, "], {});\n", from)
+		writeln!(file, "], 0x{:02x});\n", from)
 	}
 }
 
