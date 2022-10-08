@@ -3,13 +3,26 @@ use std::io;
 
 use crate::{
 	support::*,
-	common::*,
 	token_data,
 	line_numbers,
 };
 
 use arrayvec::ArrayVec;
 use thiserror::Error;
+
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Line {
+	pub line_number: u16,
+	pub data: Box<[u8]>,
+}
+
+impl Line {
+	pub fn new(line_number: u16, data: Box<[u8]>) -> Self {
+		Self { line_number, data }
+	}
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum UnpackError {
@@ -344,8 +357,6 @@ impl U8Ext for u8 {}
 mod test_parser {
 	use super::*;
 
-	use std::borrow::Borrow;
-
 	#[derive(Debug)]
 	#[repr(transparent)]
 	pub(crate) struct InMemoryBytes<I: Iterator<Item = u8>>(pub I);
@@ -433,7 +444,7 @@ mod test_parser {
 			for i in 0..N {
 				let line = parser.next_line().expect("unexpected parse failure");
 				assert_eq!(Some(line_numbers[i]), line.as_ref().map(|l| l.line_number));
-				assert_eq!(Some(expected[i]), line.as_ref().map(Borrow::<[u8]>::borrow));
+				assert_eq!(Some(expected[i]), line.as_ref().map(|l| &*l.data));
 			}
 
 			assert_eq!(None, parser.next_line().expect("unexpected parse failure")
@@ -458,7 +469,8 @@ mod test_parser {
 			let line = parser.next_line()
 				.expect("unexpected parse error")
 				.expect("unexpected parsed EOF");
-			assert_eq!(Line::new(line_number, exp_data), line);
+			assert_eq!(line_number, line.line_number);
+			assert_eq!(exp_data, &*line.data);
 		};
 
 		expect_success(10, b"PRINT \"LOOK AROUND YOU \";");
