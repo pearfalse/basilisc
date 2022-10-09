@@ -12,6 +12,7 @@ mod token_data;
 mod line_numbers;
 mod latin1;
 mod unpack;
+mod pack;
 
 #[derive(Debug, Options)]
 enum Command {
