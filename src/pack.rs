@@ -32,11 +32,19 @@ static INFERENCE_ALIGNMENT_TRIES: [(u16, NonZeroU16); 4] = [
 
 fn infer_line_number_range(line_before: Option<u16>, line_after: Option<u16>, num_lines: u16)
 -> Result<Range> {
-	debug_assert!(line_before.or(line_after).is_some());
+	// we can flatten line_after immediately, but line_before has to wait
+	//  (can't go below 0, which is a number we can't pre-reserve as a dummy line_before)
 	let line_after = line_after.unwrap_or(0xff00);
 	debug_assert!(line_before.unwrap_or(0) < line_after);
 
-	let ctor = move |start: u16, step: NonZeroU16| Ok(Range::new(start, step));
+	if num_lines == 0 {
+		return Ok(Range::new(10, nonzero!(10u16))); // always succeeds
+	}
+
+	// the one case where we need to use line 0
+	if line_before.is_none() && line_after == num_lines {
+		return Ok(Range::new(0, nonzero!(1u16)));
+	}
 
 	// try various heuristics, in very subjective order of niceness
 	for (align, step) in INFERENCE_ALIGNMENT_TRIES {
@@ -44,15 +52,28 @@ fn infer_line_number_range(line_before: Option<u16>, line_after: Option<u16>, nu
 			1 => 0,
 			_ => 1,
 		});
-		let aligned_first = (line_before + align) / align * align;
-		let aligned_last = aligned_first + ((num_lines - 1) * step.get());
-		if aligned_last < line_after {
-			return ctor(aligned_first, step);
+
+		if let Some(done) = (|| -> Option<Range> {
+			let aligned_first = line_before.checked_add(align)?
+			/ align * align;
+
+			// `aligned_last` calc can overflow in extremely wrong cases
+			let aligned_last = (num_lines - 1)
+				.checked_mul(step.get())?
+				.checked_add(aligned_first)?;
+
+			if aligned_last < line_after {
+				Some(Range::new(aligned_first, step))
+			} else {
+				None
+			}
+		})() {
+			return Ok(done);
 		}
 	}
 
 	Err(Error::TooManyUnnumberedLines {
-		max_possible: line_after - line_before.unwrap_or(0) - 1,
+		max_possible: line_after - line_before.map(|lb| lb + 1).unwrap_or(0),
 		needed: num_lines.into(),
 	})
 }
@@ -88,6 +109,13 @@ mod test_line_number_inference {
 	}
 
 	#[test]
+	fn full_program() {
+		for num_lines in [1, 100, 0x197f /* this * 10 + 10 == 0xff00 */, 0] {
+			assert_eq!(range(10, 10), infer_line_number_range(None, None, num_lines));
+		}
+	}
+
+	#[test]
 	fn no_room() {
 		assert_eq!(
 			Err(Error::TooManyUnnumberedLines { max_possible: 10, needed: 11, }),
@@ -101,12 +129,20 @@ mod test_line_number_inference {
 
 		assert_eq!(
 			Err(Error::TooManyUnnumberedLines { max_possible: 100, needed: 101 }),
-			infer_line_number_range(None, Some(101), 101)
+			infer_line_number_range(None, Some(100), 101)
 		);
 
 		assert_eq!(
 			Err(Error::TooManyUnnumberedLines { max_possible: 255, needed: 256 }),
 			infer_line_number_range(Some(0xfe00), None, 256)
 		);
+	}
+
+	#[test]
+	fn arith_overflow_checks() {
+		// highest one with reasonable integers
+		assert!(infer_line_number_range(Some(0xfefe), Some(0xfeff), 0xff00).is_err());
+		// MORE
+		assert!(infer_line_number_range(Some(u16::MAX - 1), Some(u16::MAX), u16::MAX).is_err());
 	}
 }
