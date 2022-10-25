@@ -107,7 +107,7 @@ type TokenDecodeMap = SubArray<'static, RawKeyword>;
 }
 
 fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
-	let mut list = Vec::with_capacity(TOKEN_MAP_DIRECT.len()
+	let mut list: Vec<(Keyword, TokenIter)> = Vec::with_capacity(TOKEN_MAP_DIRECT.len()
 		+ TOKEN_MAP_C6.len() + TOKEN_MAP_C7.len() + TOKEN_MAP_C8.len());
 
 	let baked_prefix = [
@@ -127,6 +127,8 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 			}));
 		}
 	}
+
+	list.sort_by_key(|&(ref kw, _)| kw.as_array());
 
 	writeln!(file, "// SAFETY: values are generated from the same parsed type at build time")?;
 	writeln!(file,
