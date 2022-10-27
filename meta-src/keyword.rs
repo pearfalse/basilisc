@@ -14,7 +14,7 @@ pub(crate) type RawKeyword = [u8; STORE_SIZE as usize];
 ///
 /// This type provides interfaces to BASIC keywords that are referenced from some fixed-size
 /// backing store, which `Keyword` may own or borrow.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub(crate) struct Keyword {
 	/// Actual meaningful characters
@@ -121,6 +121,19 @@ impl Keyword {
 	#[inline(always)]
 	const fn assert_iter_state(&self) {
 		debug_assert!(self.iter_state == 0);
+	}
+}
+
+
+impl PartialOrd for Keyword {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+
+impl Ord for Keyword {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.as_bytes().cmp(other.as_bytes())
 	}
 }
 
