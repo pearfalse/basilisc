@@ -440,7 +440,7 @@ mod test_parser {
 			expected: &[&[u8]; N],
 			src: &[u8],
 		) {
-			let mut parser = Parser::new(src);
+			let mut parser = Parser::new(src.iter());
 			for i in 0..N {
 				let line = parser.next_line().expect("unexpected parse failure");
 				assert_eq!(Some(line_numbers[i]), line.as_ref().map(|l| l.line_number));
@@ -463,7 +463,7 @@ mod test_parser {
 	fn just_look_around_you() {
 		let mut parser = Parser::new(
 			b"\r\0\x0a\x19\xf1 \"LOOK AROUND YOU \";\r\0\x14\x0a\xe5 \x8dTJ@\r\xff"
-			.as_slice());
+			.as_slice().iter());
 
 		let mut expect_success = |line_number: u16, exp_data: &[u8]| {
 			let line = parser.next_line()
@@ -500,7 +500,7 @@ mod test_parser {
 			13, 0, 10, 5,  0xf4,
 			13, 0, 20, 9,  0xe5, 0x8d, 0x54, 0x5e, 0x40,
 			13, 255
-		].as_slice());
+		].as_slice().iter());
 		let expected = [
 			(10, b"REM".as_slice()),
 			(20, b"GOTO30"),

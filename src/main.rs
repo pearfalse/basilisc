@@ -195,7 +195,7 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 	};
 	let mut output = BufWriter::new(output);
 
-	let input: &mut dyn io::BufRead = match &*args.input_file {
+	let input: &mut dyn io::Read = match &*args.input_file {
 		"-" => {
 			stdin = io::stdin();
 			stdin_lock = stdin.lock();
