@@ -1,8 +1,8 @@
 use core::num::NonZeroU8;
-use std::fmt;
+use std::{iter::FusedIterator, fmt};
 
 /// An interator optimised for yielding a BBC BASIC token.
-#[derive(Debug, Clone)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub(crate) struct TokenIter {
 	a: Option<NonZeroU8>,
 	b: Option<NonZeroU8>,
@@ -23,6 +23,33 @@ impl TokenIter {
 			a: Some(prefix),
 			b: Some(value),
 		}
+	}
+
+	pub(crate) fn to_byte_slice<'stor>(&'_ self, storage: &'stor mut [u8; 2]) -> &'stor mut [u8] {
+		match (self.a, self.b) {
+			(Some(a), Some(b)) => {
+				storage[0] = a.get();
+				storage[1] = b.get();
+				&mut storage[..]
+			},
+			(Some(a), None) => {
+				storage[0] = a.get();
+				&mut storage[..1]
+			},
+			(None, _) => &mut []
+		}
+	}
+}
+
+impl fmt::Debug for TokenIter {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str("TokenIter[")?;
+		match (self.a, self.b) {
+			(Some(a), Some(b)) => write!(f, "{:02x}, {:02x}", a, b),
+			(Some(a), None) => write!(f, "{:02x}", a),
+			(None, _) => Ok(()),
+		}?;
+		f.write_str("]")
 	}
 }
 
@@ -100,6 +127,8 @@ impl Iterator for TokenIter {
 		core::mem::replace(&mut self.a, self.b.take())
 	}
 }
+
+impl FusedIterator for TokenIter { }
 
 #[cfg(test)]
 mod tests {

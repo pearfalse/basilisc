@@ -1,6 +1,6 @@
 #![allow(dead_code)] // neither build.rs nor bin crate will ever use 100% of methods here
 
-use std::{num::NonZeroU8, convert::TryFrom, mem};
+use std::{fmt, num::NonZeroU8, convert::TryFrom, mem};
 
 use ascii::AsciiStr;
 
@@ -14,7 +14,7 @@ pub(crate) type RawKeyword = [u8; STORE_SIZE as usize];
 ///
 /// This type provides interfaces to BASIC keywords that are referenced from some fixed-size
 /// backing store, which `Keyword` may own or borrow.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 #[repr(C)]
 pub(crate) struct Keyword {
 	/// Actual meaningful characters
@@ -31,6 +31,12 @@ pub(crate) struct Keyword {
 #[doc(hidden)]
 fn _assert_struct_size() {
 	static_assertions::assert_eq_size!(RawKeyword, Keyword, Option<Keyword>);
+}
+
+impl fmt::Debug for Keyword {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "Keyword(\"{}\")", self.as_ascii_str())
+	}
 }
 
 impl Keyword {
