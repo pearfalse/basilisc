@@ -76,6 +76,9 @@ impl Keyword {
 		}
 	}
 
+	/// Returns the length of this keyword.
+	pub(crate) fn len(&self) -> NonZeroU8 { self.len }
+
 	/// Returns the keyword as an ASCII string slice.
 	///
 	/// There are two methods with this name, this one being specialised for borrowing `Keyword`

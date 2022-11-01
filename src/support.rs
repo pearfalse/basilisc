@@ -41,6 +41,43 @@ impl<'a> NextByte for std::slice::Iter<'a, u8> {
 	}
 }
 
+
+pub(crate) trait ArrayVecExt {
+	fn remove_first(&mut self, x: usize);
+}
+
+impl<T, const N: usize> ArrayVecExt for arrayvec::ArrayVec<T, N> {
+	fn remove_first(&mut self, x: usize) {
+		let old_len = self.len();
+		let new_len = old_len.checked_sub(x as usize).unwrap();
+		unsafe {
+			let data = self.as_mut_ptr();
+			std::ptr::copy(data.add(x), data, new_len);
+			self.set_len(new_len);
+		}
+	}
+}
+
+#[cfg(test)]
+mod test_arrayvec_ext {
+    use arrayvec::ArrayVec;
+
+    use super::ArrayVecExt;
+
+	#[test]
+	fn remove_first() {
+		let mut av: ArrayVec<u8, 9> = ArrayVec::new();
+		for i in 20..29 {
+			av.push(i);
+		}
+
+		av.remove_first(3);
+
+		assert_eq!(&[23, 24, 25, 26, 27, 28], &*av);
+	}
+}
+
+
 // include meta-src files that we want
 #[path = "../meta-src/keyword.rs"] mod keyword;
 #[path = "../meta-src/token_iter.rs"] mod token_iter;

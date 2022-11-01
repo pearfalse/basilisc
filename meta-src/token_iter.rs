@@ -39,6 +39,14 @@ impl TokenIter {
 			(None, _) => &mut []
 		}
 	}
+
+	pub(crate) fn len(&self) -> u8 {
+		match (self.a, self.b) {
+			(Some(_), Some(_)) => 2,
+			(Some(_), None) => 1,
+			_ => 0,
+		}
+	}
 }
 
 impl fmt::Debug for TokenIter {
@@ -126,9 +134,20 @@ impl Iterator for TokenIter {
 	fn next(&mut self) -> Option<Self::Item> {
 		core::mem::replace(&mut self.a, self.b.take())
 	}
+
+	fn size_hint(&self) -> (usize, Option<usize>) {
+		let len = <Self as ExactSizeIterator>::len(self);
+		(len, Some(len))
+	}
 }
 
 impl FusedIterator for TokenIter { }
+
+impl ExactSizeIterator for TokenIter {
+	fn len(&self) -> usize {
+		Self::len(self) as usize
+	}
+}
 
 #[cfg(test)]
 mod tests {
