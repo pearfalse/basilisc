@@ -130,9 +130,10 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 
 	list.sort_by_key(|&(ref kw, _)| kw.as_array());
 
+	writeln!(file, "pub(crate) type TokenLookupEntry = (Keyword, TokenIter);")?;
 	writeln!(file, "// SAFETY: values are generated from the same parsed type at build time")?;
 	writeln!(file,
-		"pub(crate) static LOOKUP_MAP: [(Keyword, TokenIter); {}] = unsafe {{[",
+		"pub(crate) static LOOKUP_MAP: [TokenLookupEntry; {}] = unsafe {{[",
 		list.len(),
 	)?;
 
