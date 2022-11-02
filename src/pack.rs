@@ -113,7 +113,6 @@ impl<I> Parser<I> where
 		let mut state = LineParser::BeforeLineNumber;
 		self.buf.clear();
 		self.is_eof = true; // assume EOF, prove wrong when breaking on `\n`
-		println!("new line");
 		while let Some(byte) = self.inner.next_byte()? {
 			match byte {
 				b'\r' => continue, // blunt way of handling CRLF
@@ -155,7 +154,7 @@ impl<I> Parser<I> where
 		self.token_scan.flush();
 
 		let flushed_bytes = (&mut self.token_scan).collect::<TokenScanBuffer>();
-		self.try_add_bytes(&*dbg!(flushed_bytes))?;
+		self.try_add_bytes(&*flushed_bytes)?;
 
 		let final_line_number = match state {
 			LineParser::BeforeLineNumber => return Ok(None),
@@ -167,8 +166,6 @@ impl<I> Parser<I> where
 	}
 
 	fn update_body(&mut self, byte: u8) -> Result<()> {
-		// we might have some stuff in the token scan to flush
-
 		self.token_scan.narrow(byte);
 
 		// narrowing can release a token too
@@ -318,14 +315,11 @@ impl TokenScan {
 	}
 
 	fn narrow(&mut self, byte: u8) {
-		print!("narrowing with &{:02x?}... ", byte);
-
 		self.bytes.push(byte);
 		self._pinch(self.bytes.len() - 1);
 
 		match self.pinch {
 			[perfect] if perfect.0.as_bytes() == &*self.bytes => {
-				println!("perfect match with {}", perfect.0.as_ascii_str());
 				// perfect match
 				self.token = perfect.1.clone();
 				self.best_match = None;
@@ -335,7 +329,6 @@ impl TokenScan {
 			},
 
 			[prefix, ..] if prefix.0.as_bytes() == &*self.bytes => {
-				println!("best effort is now {}", prefix.0.as_ascii_str());
 				// at least one match, but there might be more
 				self.best_match = Some(prefix);
 			},
@@ -346,12 +339,9 @@ impl TokenScan {
 				self.token = best_match.1.clone();
 				self.bytes.remove_first(best_match.0.len().get() as usize);
 
-				println!("self.bytes is now {:02x?}", &*self.bytes);
-
 				// remake pinch sequence for remaining characters
 				self.pinch = PINCH_DEFAULT;
 				self._pinch(0);
-				dbg!(&self.token);
 
 				// after pinching remaining bytes, re-match best effort
 				if let [be, ..] = self.pinch {
@@ -368,7 +358,6 @@ impl TokenScan {
 	fn try_pull(&mut self) -> Option<u8> {
 		// flushing a token?
 		if let Some(next) = self.token.next() {
-			println!("flushing a token: {:?}", next);
 			return Some(next.get());
 		}
 
@@ -385,7 +374,6 @@ impl TokenScan {
 
 	fn flush(&mut self) {
 		if let Some(&(ref keyword, ref iter)) = self.best_match.take() {
-			println!("will tokenise best effort {}", keyword.as_ascii_str());
 			// the token is almost definitely shorter than the word it replaces
 			// how much shifting will we have to do?
 			self.token = iter.clone();
@@ -422,8 +410,6 @@ impl TokenScan {
 				}
 			}
 
-			println!("have best match: {}, pinch is now {:?}",
-				self.best_match.is_some(), self.pinch);
 			if self.pinch.is_empty() { break; }
 		}
 	}
