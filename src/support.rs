@@ -49,7 +49,9 @@ pub(crate) trait ArrayVecExt {
 impl<T, const N: usize> ArrayVecExt for arrayvec::ArrayVec<T, N> {
 	fn remove_first(&mut self, x: usize) {
 		let old_len = self.len();
-		let new_len = old_len.checked_sub(x as usize).unwrap();
+		let new_len = old_len.checked_sub(x as usize)
+			.unwrap_or_else(|| panic!("couldn't remove {} elements from a {}-wide ArrayVec",
+				x, old_len));
 		unsafe {
 			let data = self.as_mut_ptr();
 			std::ptr::copy(data.add(x), data, new_len);

@@ -168,11 +168,14 @@ impl<I> Parser<I> where
 
 	fn update_body(&mut self, byte: u8) -> Result<()> {
 		// we might have some stuff in the token scan to flush
+
+		self.token_scan.narrow(byte);
+
+		// narrowing can release a token too
 		while let Some(b) = self.token_scan.try_pull() {
 			self.try_add_bytes(&[b])?;
 		}
 
-		self.token_scan.narrow(byte);
 		Ok(())
 	}
 
@@ -269,14 +272,15 @@ mod test_parser {
 
 	#[test]
 	fn problematic_prefixes() {
-		let mut parser = Parser::new(b"10EN\n20END\n30ENDPR\n40ENDPROC\n50ENDPROCK"
+		let mut parser = Parser::new(b"10EN\n20END\n30ENDPR\n40ENDPROC\n50ENDPROCK\n60ENDPI"
 			.as_slice().iter());
-		for _ in 0..4 {
+		for _ in 0..5 {
 			assert_eq!(Ok(true), parser.next_line());
 		}
 		assert_eq!(Ok(false), parser.next_line());
 
-		const EXPECT: [&'static [u8]; 5] = [b"EN", b"\xe0", b"\xe0PR", b"\xe1", b"\xe1K"];
+		const EXPECT: [&'static [u8]; 6] = [b"EN", b"\xe0", b"\xe0PR", b"\xe1", b"\xe1K",
+			b"\xe0\xaf"];
 		let mut ln = (10u16..).step_by(10);
 		let mut expect = EXPECT.iter().copied();
 		for line in parser.lines {
@@ -335,6 +339,27 @@ impl TokenScan {
 				// at least one match, but there might be more
 				self.best_match = Some(prefix);
 			},
+
+			[] if self.best_match.is_some() => {
+				// actively apply best match
+				let best_match = self.best_match.take().unwrap();
+				self.token = best_match.1.clone();
+				self.bytes.remove_first(best_match.0.len().get() as usize);
+
+				println!("self.bytes is now {:02x?}", &*self.bytes);
+
+				// remake pinch sequence for remaining characters
+				self.pinch = PINCH_DEFAULT;
+				self._pinch(0);
+				dbg!(&self.token);
+
+				// after pinching remaining bytes, re-match best effort
+				if let [be, ..] = self.pinch {
+					if self.bytes.starts_with(be.0.as_bytes()) {
+						self.best_match = Some(be);
+					}
+				}
+			}
 			_ => {},
 		};
 	}
@@ -343,6 +368,7 @@ impl TokenScan {
 	fn try_pull(&mut self) -> Option<u8> {
 		// flushing a token?
 		if let Some(next) = self.token.next() {
+			println!("flushing a token: {:?}", next);
 			return Some(next.get());
 		}
 
@@ -362,7 +388,6 @@ impl TokenScan {
 			println!("will tokenise best effort {}", keyword.as_ascii_str());
 			// the token is almost definitely shorter than the word it replaces
 			// how much shifting will we have to do?
-			let ilen = iter.len();
 			self.token = iter.clone();
 
 			// remove effective padding
@@ -397,8 +422,9 @@ impl TokenScan {
 				}
 			}
 
+			println!("have best match: {}, pinch is now {:?}",
+				self.best_match.is_some(), self.pinch);
 			if self.pinch.is_empty() { break; }
-			println!("matching prefix: {}, pinch is now {:?}", self.best_match.is_some(), self.pinch);
 		}
 	}
 }
