@@ -1,6 +1,6 @@
 use crate::token_data::{TokenLookupEntry, self};
 
-use std::num::NonZeroU16;
+use std::{num::NonZeroU16, marker::PhantomData};
 
 use arrayvec::ArrayVec;
 use nonzero_ext::nonzero;
@@ -12,6 +12,8 @@ const LINE_NUMBER_CAP: u16 = 0xff00;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+	#[error("too many lines in program (limit is 65280)")]
+	TooManyLines,
 	#[error("too many lines to fully number the program (had room for {max_possible}, but needed {needed}")]
 	TooManyUnnumberedLines { max_possible: u16, needed: u32 },
 	#[error("line too long (must be under 252 chars, but was {length})")]
@@ -55,11 +57,16 @@ impl PartialEq for Error {
 }
 
 #[derive(Debug)]
-pub(crate) struct Line {
-	line_number: Option<u16>,
+pub struct Line {
+	line_number: u16,
 	contents: Box<[u8]>,
 }
 
+#[derive(Debug)]
+struct UnnumberedLine {
+	line_number: Option<u16>,
+	contents: Box<[u8]>,
+}
 
 type Result<T> = ::std::result::Result<T, Error>;
 type LineBuffer = ::arrayvec::ArrayVec<u8, 251>;
@@ -67,7 +74,7 @@ type LineBuffer = ::arrayvec::ArrayVec<u8, 251>;
 #[derive(Debug)]
 pub struct Parser<I> {
 	buf: ArrayVec<u8, MAX_LINE_LEN>,
-	lines: Vec<Line>,
+	lines: Vec<UnnumberedLine>,
 	token_scan: TokenScan,
 	inner: I,
 	is_eof: bool,
@@ -91,8 +98,13 @@ impl<I> Parser<I> where
 		// we need early return for fuse behaviour
 		if self.is_eof { return Ok(false); }
 
+		if self.lines.len() == LINE_NUMBER_CAP as usize {
+			// cannot add more lines, no way no how
+			return Err(Error::TooManyLines);
+		}
+
 		if let Some(maybe_ln) = self.raw_line()? {
-			self.lines.push(Line {
+			self.lines.push(UnnumberedLine {
 				line_number: maybe_ln,
 				contents: (&*self.buf).into(),
 			});
@@ -163,6 +175,120 @@ impl<I> Parser<I> where
 		};
 
 		Ok(Some(final_line_number))
+	}
+
+	pub fn set_line_numbers(mut self) -> Result<Vec<Line>> {
+		for gap in FindGaps::within(&mut *self.lines).collect::<Vec<Gap>>() {
+			let to_apply = infer_line_number_range(gap.before, gap.after,
+				gap.lines.len().try_into().unwrap())?;
+			for (ln, target) in to_apply.zip(gap.lines.iter_mut()) {
+				target.line_number = Some(ln);
+			}
+
+		}
+
+		todo!("final result");
+
+		#[derive(Debug)]
+		struct Gap<'a> {
+			pub before: Option<u16>,
+			pub after: Option<u16>,
+			pub lines: &'a mut [UnnumberedLine],
+		}
+
+		#[derive(Debug)]
+		struct FindGaps<'a> {
+			start: *mut UnnumberedLine,
+			end: *mut UnnumberedLine,
+			_lifetime: PhantomData<&'a mut UnnumberedLine>,
+		}
+
+		impl<'a> FindGaps<'a> {
+			fn within(lines: &'a mut [UnnumberedLine]) -> Self {
+				let start = lines.as_mut_ptr();
+				Self {
+					start,
+					end: unsafe { start.add(lines.len()) },
+					_lifetime: PhantomData,
+				}
+			}
+		}
+
+		impl<'a> Iterator for FindGaps<'a> {
+			type Item = Gap<'a>;
+
+			fn next(&mut self) -> Option<Self::Item> {
+				use std::ptr;
+
+				let mut search = unsafe {
+					// SAFETY: shared borrow starts here; to be split before &mut refs
+					&*ptr::slice_from_raw_parts(self.start,
+						self.end.offset_from(self.start) as usize)
+				};
+				let (before, slice_start) = loop {
+					match search {
+						[a, ..] if a.line_number.is_none()
+						// start of slice is without line number
+						// should only happen on first iteration
+						=> break (None, a as *const _ as *mut UnnumberedLine),
+
+						[a, b, ..] if a.line_number.is_some() && b.line_number.is_none()
+						// we've found the boundary
+						=> {
+							search = &search[1..];
+							break (a.line_number, b as *const _ as *mut UnnumberedLine)
+						},
+
+						[]
+						// no more nodes to iterate
+						=> return None,
+						_
+
+						// pop front node and keep doing
+						=> {
+							debug_assert!(!search.is_empty());
+							search = &search[1..];
+						}
+					}
+				};
+
+				let mut count = 0usize;
+				let (after, new_start) = loop {
+					match search {
+						[a, ..] if a.line_number.is_none()
+						// keep searching
+						=> {
+							count += 1;
+							continue;
+						},
+
+						[a, ..]
+						// next line number found
+						=> {
+							debug_assert!(a.line_number.is_some());
+							break (a.line_number, a as *const _ as *mut UnnumberedLine);
+						},
+
+						[]
+						//end
+						=> break (None, <&mut [UnnumberedLine]>::default().as_mut_ptr()),
+					}
+				};
+
+				// restrict ptr slice to other elements we haven't scanned yet
+				// this makes it safe to then mutably downcast the pointers we saved
+				self.start = new_start;
+
+				Some(Gap {
+					before, after, lines: unsafe {
+						// SAFETY: there is no other active &'a mut borrow, and
+						// no overlap between self.lines and our new slice
+						debug_assert!(slice_start.add(count) <= new_start);
+						&mut *std::ptr::slice_from_raw_parts_mut(slice_start, count)
+					}
+				})
+			}
+		}
 	}
 
 	fn update_body(&mut self, byte: u8) -> Result<()> {
@@ -241,7 +367,7 @@ mod test_parser {
 		// this shouldn't try to read anything
 		assert_eq!(Ok(false), parser.next_line());
 
-		let [line1, line2, line3]: [Line; 3] = parser.lines.try_into().unwrap();
+		let [line1, line2, line3]: [UnnumberedLine; 3] = parser.lines.try_into().unwrap();
 
 		assert_eq!(Some(10), line1.line_number);
 		assert_eq!(None, line2.line_number);
@@ -258,7 +384,7 @@ mod test_parser {
 		assert_eq!(Ok(true), parser.next_line());
 		assert_eq!(Ok(false), parser.next_line());
 
-		let [line1, line2]: [Line; 2] = parser.lines.try_into().unwrap();
+		let [line1, line2]: [UnnumberedLine; 2] = parser.lines.try_into().unwrap();
 
 		assert!(line1.line_number.is_none());
 		assert!(line2.line_number.is_none());
@@ -509,6 +635,17 @@ impl Range {
 		Self { start, step }
 	}
 }
+
+impl Iterator for Range {
+	type Item = u16;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		let prev = self.start;
+		self.start = self.start.checked_add(self.step.get())?;
+		Some(prev)
+	}
+}
+
 
 static INFERENCE_ALIGNMENT_TRIES: [(u16, NonZeroU16); 4] = [
 	(10, nonzero!(10u16)),
