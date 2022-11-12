@@ -25,6 +25,17 @@ impl<'a> FindGaps<'a> {
 			_lifetime: PhantomData,
 		}
 	}
+
+	fn sp_addr(&self, addr: &UnnumberedLine) -> *mut UnnumberedLine {
+		#[cfg(feature = "unstable")]
+		{
+			self.start.with_addr((addr as *const UnnumberedLine).addr())
+		}
+		#[cfg(not(feature = "unstable"))]
+		{
+			addr as *const UnnumberedLine as *mut UnnumberedLine
+		}
+	}
 }
 
 impl<'a> Iterator for FindGaps<'a> {
@@ -43,35 +54,37 @@ impl<'a> Iterator for FindGaps<'a> {
 				[a, ..] if a.line_number.is_none()
 				// start of slice is without line number
 				// should only happen on first iteration
-				=> break (None, a as *const _ as *mut UnnumberedLine),
+				=> break (None, self.sp_addr(a)),
 
 				[a, b, ..] if a.line_number.is_some() && b.line_number.is_none()
 				// we've found the boundary
 				=> {
 					search = &search[1..];
-					break (a.line_number, b as *const _ as *mut UnnumberedLine)
+					break (a.line_number, self.sp_addr(b))
 				},
 
 				[]
 				// no more nodes to iterate
 				=> return None,
-				_
 
+				[_, rest @ ..]
 				// pop front node and keep doing
 				=> {
 					debug_assert!(!search.is_empty());
-					search = &search[1..];
+					search = rest;
 				}
 			}
+
 		};
 
 		let mut count = 0usize;
 		let (after, new_start) = loop {
 			match search {
-				[a, ..] if a.line_number.is_none()
+				[a, rest @ ..] if a.line_number.is_none()
 				// keep searching
 				=> {
 					count += 1;
+					search = rest;
 					continue;
 				},
 
@@ -79,12 +92,12 @@ impl<'a> Iterator for FindGaps<'a> {
 				// next line number found
 				=> {
 					debug_assert!(a.line_number.is_some());
-					break (a.line_number, a as *const _ as *mut UnnumberedLine);
+					break (a.line_number, self.sp_addr(a));
 				},
 
 				[]
 				//end
-				=> break (None, <&mut [UnnumberedLine]>::default().as_mut_ptr()),
+				=> break (None, self.end),
 			}
 		};
 
@@ -97,8 +110,90 @@ impl<'a> Iterator for FindGaps<'a> {
 				// SAFETY: there is no other active &'a mut borrow, and
 				// no overlap between self.lines and our new slice
 				debug_assert!(slice_start.add(count) <= new_start);
+
+				// TODO: miri is unhappy with this on the stable path, because the address
+				// technically comes from a *const UnnumberedLine that we cast, but with strict
+				// provenance not available on stable, we don't have a lot of choice here
 				&mut *std::ptr::slice_from_raw_parts_mut(slice_start, count)
 			}
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use arrayvec::ArrayVec;
+
+	use super::*;
+
+	fn make(count: u8) -> (Vec<UnnumberedLine>, *const UnnumberedLine) {
+		use std::io::Write;
+		let mut write_buf = ArrayVec::<u8, 2>::new();
+		let vec = (0..count).map(move |idx| {
+			write_buf.clear();
+			write!(&mut write_buf, "{:02x}", idx).unwrap();
+			UnnumberedLine {
+				line_number: None,
+				contents: (&*write_buf).to_owned().into_boxed_slice(),
+			}
+		}).collect::<Vec<_>>();
+
+		let start = vec.as_ptr();
+		(vec, start)
+	}
+
+	#[test]
+	fn no_given_lines() {
+		let (mut stack, start) = make(5);
+
+		let mut gaps = FindGaps::within(&mut *stack);
+		let next = gaps.next().unwrap();
+		assert_eq!(None, next.before);
+		assert_eq!(None, next.after);
+		assert_eq!(start, next.lines.as_ptr());
+		assert_eq!(5, next.lines.len());
+
+		assert!(gaps.next().is_none());
+	}
+
+	#[test]
+	fn add_third_of_five() {
+		let (mut stack, start) = make(5);
+
+		stack[0].line_number = Some(10);
+		stack[1].line_number = Some(20);
+		stack[3].line_number = Some(40);
+		stack[4].line_number = Some(50);
+
+		let mut gaps = FindGaps::within(&mut stack);
+		let next = gaps.next().unwrap();
+		assert_eq!(Some(20), next.before); // gap is after line 20
+		assert_eq!(Some(40), next.after); // gap is before line 40
+		assert_eq!(unsafe { start.add(2) }, next.lines.as_ptr()); // gap is [2..=2]
+		assert_eq!(1, next.lines.len()); // ditto
+
+		assert!(gaps.next().is_none());
+	}
+
+	#[test]
+	fn goto_100() {
+		let (mut stack, start) = make(7);
+
+		stack[3].line_number = Some(100);
+
+		let mut gaps = FindGaps::within(&mut stack);
+		let next = gaps.next().unwrap();
+		assert_eq!(None, next.before);
+		assert_eq!(Some(100), next.after);
+		assert_eq!(start, next.lines.as_ptr());
+		assert_eq!(3, next.lines.len());
+
+		let next = gaps.next().unwrap();
+		assert_eq!(Some(100), next.before);
+		assert_eq!(None, next.after);
+		assert_eq!(unsafe { start.add(4) }, next.lines.as_ptr());
+		assert_eq!(3, next.lines.len());
+
+		assert!(gaps.next().is_none());
 	}
 }

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Simon Harris <simon@pearfalse.com>"]
 
+[features]
+unstable = []
+
 [dependencies]
 gumdrop = "0.8"
 ascii = "1.0"
