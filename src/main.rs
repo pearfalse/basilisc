@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use std::fmt::Debug;
 use std::fs;
 use std::io::{self, BufReader, BufWriter, Write as _};
-use std::path::PathBuf;
 use std::error::Error;
 
 use gumdrop::Options;
@@ -15,6 +14,8 @@ mod line_numbers;
 mod latin1;
 mod unpack;
 mod pack;
+
+use pack::Error as PackError;
 
 #[derive(Debug, Options)]
 enum Command {
@@ -29,14 +30,11 @@ enum Command {
 #[derive(Debug, Options)]
 struct PackArgs {
 
-	#[options(help = "ASCII input file to encode")]
-	input_file: PathBuf,
+	#[options(help = "ASCII input file to encode", required)]
+	input_file: String,
 
-	#[options(help = "output BASIC file")]
-	output_file: PathBuf,
-
-	#[options(short = "b", long = "bbc", help = "use BBC Micro version file")]
-	use_bbc_format: bool,
+	#[options(help = "output BASIC file", required)]
+	output_file: String,
 
 	#[options(help = "show help for this command")]
 	help: bool,
@@ -45,10 +43,10 @@ struct PackArgs {
 #[derive(Debug, Options)]
 struct UnpackArgs {
 
-	#[options(help = "BASIC file to decode")]
+	#[options(help = "BASIC file to decode", required)]
 	input_file: String,
 
-	#[options(help = "output ASCII file")]
+	#[options(help = "output ASCII file", required)]
 	output_file: String,
 
 	#[options(help = "use of line numbers in output (minimal, always, forbid)",
@@ -102,10 +100,11 @@ impl Command {
 		}
 	}
 
-	fn print_usage_and_exit(command_name: Option<&'static str>) -> ! {
+	fn print_usage_and_exit(process_name: &str, command_name: Option<&'static str>) -> ! {
 		let to_print = command_name.and_then(Command::command_usage)
 			.unwrap_or_else(Command::usage);
 		eprintln!("{}", to_print);
+		eprintln!("\nRun '{} `subcommand` --help' for more guidance", process_name);
 		std::process::exit(ExitCode::Success.into());
 	}
 }
@@ -127,6 +126,14 @@ impl From<ExitCode> for i32 {
 }
 
 
+trait HelpExt: Eq + PartialEq<str> {
+	fn is_help(&self) -> bool {
+		["help", "-h", "--help", "-help"].into_iter().any(|help| self == help)
+	}
+}
+impl HelpExt for str {}
+
+
 fn main() {
 	let (process, args_str) = {
 		let mut iter = std::env::args();
@@ -135,11 +142,11 @@ fn main() {
 		);
 		(process, iter.collect::<Vec<_>>())
 	};
-	if matches!(*args_str, [ref s] if s == "help") {
-		Command::print_usage_and_exit(None);
+	if matches!(*args_str, [ref s] if s.is_help()) {
+		Command::print_usage_and_exit(&*process, None);
 	}
 	let args = match Command::parse_args_default(&*args_str) {
-		Ok(a) if a.user_wants_help() => Command::print_usage_and_exit(a.command_name()),
+		Ok(a) if a.user_wants_help() => Command::print_usage_and_exit(&*process, a.command_name()),
 		Ok(a) => a,
 		Err(e) => {
 			eprintln!("argument error: {}", e);
@@ -149,6 +156,7 @@ fn main() {
 	};
 
 	let mut unpack_error: Option<UnpackError> = None;
+	let mut pack_error: Option<PackError> = None;
 
 	let result : Result<(), (&dyn Error, ExitCode)> = match args {
 		Command::Unpack(args) => run_unpack(args).map_err(|e| {
@@ -160,6 +168,15 @@ fn main() {
 
 			(unpack_error.insert(e) as &dyn Error, exit_code)
 		}),
+		Command::Pack(args) => run_pack(args).map_err(|e| {
+			let exit_code = match e {
+				PackError::IoError(_) => ExitCode::IoError,
+				_ => ExitCode::InvalidData,
+			};
+
+			(pack_error.insert(e) as &dyn Error, exit_code)
+		}),
+		#[allow(unreachable_patterns)]
 		_ => {
 			eprintln!("not supported yet, sorry");
 			std::process::exit(ExitCode::InternalError.into());
@@ -191,8 +208,8 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 			&mut stdout_lock
 		},
 		path => {
-			input_file = fs::File::create(path)?;
-			&mut input_file
+			output_file = fs::File::create(path)?;
+			&mut output_file
 		}
 	};
 	let mut output = BufWriter::new(output);
@@ -204,8 +221,8 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 			&mut stdin_lock
 		},
 		path => {
-			output_file = BufReader::new(fs::File::open(path)?);
-			&mut output_file
+			input_file = BufReader::new(fs::File::open(path)?);
+			&mut input_file
 		},
 	};
 
@@ -245,10 +262,56 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 				.as_bytes()
 				)?;
 		}
-		writeln!(output)?;
+		writeln!(output, "")?;
 	}
 
 	output.flush()?;
+
+	Ok(())
+}
+
+fn run_pack(args: PackArgs) -> Result<(), PackError> {
+	let stdin;
+	let stdout;
+
+	let mut stdin_lock;
+	let mut stdout_lock;
+
+	let mut input_file;
+	let mut output_file;
+
+	let output: &mut dyn io::Write = match &*args.output_file {
+		"-" => {
+			stdout = io::stdout();
+			stdout_lock = stdout.lock();
+			&mut stdout_lock
+		},
+		path => {
+			output_file = fs::File::create(path)?;
+			&mut output_file
+		},
+	};
+
+	let input: &mut dyn io::Read = match &*args.input_file {
+		"-" => {
+			stdin = io::stdin();
+			stdin_lock = stdin.lock();
+			&mut stdin_lock
+		},
+		path => {
+			input_file = BufReader::new(fs::File::open(path)?);
+			&mut input_file
+		},
+	};
+
+	let mut parser = pack::Parser::new(input);
+	let mut cnt = 0u16;
+	while dbg!(parser.next_line())? {
+		cnt += 1;
+		eprintln!("line {}...", cnt);
+	}
+
+	parser.write(output)?;
 
 	Ok(())
 }

@@ -1,6 +1,6 @@
 use crate::token_data::{TokenLookupEntry, self};
 
-use std::num::NonZeroU16;
+use std::{num::NonZeroU16, io};
 
 use arrayvec::ArrayVec;
 use nonzero_ext::nonzero;
@@ -65,6 +65,20 @@ pub struct Line {
 	contents: Box<[u8]>,
 }
 
+impl Line {
+	pub fn write(&self, target: &mut dyn io::Write) -> io::Result<()> {
+		debug_assert!(self.contents.len() <= MAX_LINE_LEN);
+		let hdr_len = unsafe {
+			// SAFETY: only internal code can create `contents`, and we know it's short enough
+			(self.contents.len() as u8).checked_add(4).unwrap_unchecked() // header length
+		};
+		let line_number = self.line_number.to_be_bytes();
+		let header = [0x0d, line_number[0], line_number[1], hdr_len];
+		target.write_all(&header)?;
+		target.write_all(&*self.contents)
+	}
+}
+
 #[derive(Debug)]
 struct UnnumberedLine {
 	line_number: Option<u16>,
@@ -72,7 +86,6 @@ struct UnnumberedLine {
 }
 
 type Result<T> = ::std::result::Result<T, Error>;
-type LineBuffer = ::arrayvec::ArrayVec<u8, 251>;
 
 #[derive(Debug)]
 pub struct Parser<I> {
@@ -112,7 +125,7 @@ impl<I> Parser<I> where
 				contents: (&*self.buf).into(),
 			});
 		} else {
-			self.is_eof = false;
+			self.is_eof = true;
 		}
 		Ok(!self.is_eof)
 	}
@@ -180,7 +193,18 @@ impl<I> Parser<I> where
 		Ok(Some(final_line_number))
 	}
 
-	pub fn set_line_numbers(mut self) -> Result<Vec<Line>> {
+	pub fn write(mut self, target: &mut dyn io::Write) -> Result<()> {
+		let lines = self.into_lines()?;
+
+		for line in lines {
+			target.write_all(&*line.contents)?;
+		}
+
+		target.write_all(&[0x0d, 0xff])?;
+		Ok(())
+	}
+
+	fn into_lines(mut self) -> Result<Vec<Line>> {
 		for gap in FindGaps::within(&mut *self.lines).collect::<Vec<Gap>>() {
 			let to_apply = infer_line_number_range(gap.before, gap.after,
 				gap.lines.len().try_into().unwrap())?;
@@ -190,7 +214,14 @@ impl<I> Parser<I> where
 
 		}
 
-		todo!("final result");
+		Ok(self.lines.into_iter().enumerate().map(|(idx, ul)| {
+			let line_number = match ul.line_number {
+				Some(ln) => ln,
+				None => panic!("No line number for line at index {}", idx),
+			};
+
+			Line { line_number, contents: ul.contents }
+		}).collect::<Vec<Line>>())
 	}
 
 	fn update_body(&mut self, byte: u8) -> Result<()> {
