@@ -5,17 +5,18 @@
 			"path": ".",
 		},
 		{
-			"path": "/Users/simon/code/acorn-rust/scratch",
-		}
+			"path": "/Users/simon/code/Rust/acorn-rust/scratch"
+		},
 	],
 	"settings":
 	{
+		"rulers": [100],
 		"LSP":
 		{
 			"rust-analyzer":
 			{
-				"enabled": true
-			}
-		}
+				"enabled": true,
+			},
+		},
 	},
 }
