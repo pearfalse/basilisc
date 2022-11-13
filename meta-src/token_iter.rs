@@ -25,21 +25,6 @@ impl TokenIter {
 		}
 	}
 
-	pub(crate) fn to_byte_slice<'stor>(&'_ self, storage: &'stor mut [u8; 2]) -> &'stor mut [u8] {
-		match (self.a, self.b) {
-			(Some(a), Some(b)) => {
-				storage[0] = a.get();
-				storage[1] = b.get();
-				&mut storage[..]
-			},
-			(Some(a), None) => {
-				storage[0] = a.get();
-				&mut storage[..1]
-			},
-			(None, _) => &mut []
-		}
-	}
-
 	pub(crate) fn len(&self) -> u8 {
 		match (self.a, self.b) {
 			(Some(_), Some(_)) => 2,
