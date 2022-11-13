@@ -1,3 +1,5 @@
+//! Handles packing a textual BBC BASIC representation into a tokenised BASIC file (type `&FFB`).
+
 use crate::token_data::{TokenLookupEntry, self};
 
 use std::{num::NonZeroU16, io};

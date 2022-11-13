@@ -4,7 +4,8 @@
 //! # Encoding variations
 //!
 //! C0 control codes, while normally preserved in Unicode, are replaced with printable equivalents
-//! in the _Control Pictures_ block.
+//! in the _Control Pictures_ block. The same is done for the non-breaking space (sometimes called
+//! _hard space_) at 0xA0, where it is replaced with SYMBOL FOR SPACE (U+2420).
 //!
 //! The character for byte 0x87 has no single-character Unicode equivalent and will be replaced with
 //! SUPERSCRIPT SEVEN (U+2077).
@@ -43,6 +44,8 @@ static LATIN1_MAP: [char; 256] = [
 	'ð', 'ñ', 'ò', 'ó', 'ô', 'õ', 'ö', '÷', 'ø', 'ù', 'ú', 'û', 'ü', 'ý', 'þ', 'ÿ',
 ];
 
+/// Extensions to `char` for convenient conversion between RISC OS Latin-1 and approximate Unicode
+/// equivalents.
 pub(crate) trait CharExt {
 	/// Creates a character from a byte interpreted as RISC OS Latin-1.
 	fn from_risc_os_latin1(src: u8) -> Self;

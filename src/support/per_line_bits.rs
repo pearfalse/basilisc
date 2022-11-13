@@ -1,6 +1,10 @@
 use core::{iter, slice};
 use std::fmt;
 
+/// A packed array of bits, big enough to hold one bit per possible line number in a BASIC file
+/// (`0..0xff00`).
+///
+/// The backing storage is automatically boxed.
 pub struct PerLineBits {
 	store: Box<[u8; Self::BYTE_COUNT]>,
 }
@@ -12,19 +16,26 @@ impl fmt::Debug for PerLineBits {
 }
 
 impl PerLineBits {
-	const BYTE_COUNT: usize = 0xff00 >> 3;
+	const BYTE_COUNT: usize = (0xff00 + 7) / 8;
 
+	/// Constructs a new object. All bits are initialised to `false`.
 	pub fn new() -> Self {
 		Self {
 			store: Box::new([0u8; Self::BYTE_COUNT])
 		}
 	}
 
+	/// Retrieves the value of a bit in the array.
+	///
+	/// Returns `None` if the index is outside the logical index range.
 	pub fn try_get(&self, index: u16) -> Option<bool> {
 		let (byte_idx, bit_mask) = Self::decompose(index);
 		self.store.get(byte_idx as usize).map(|r| *r & bit_mask != 0)
 	}
 
+	/// Retrieves a mutable reference to a bit in the array.
+	///
+	/// Returns `None` if the index is outside the logical index range.
 	pub fn try_get_mut<'a>(&'a mut self, index: u16) -> Option<BitRefMut<'a>> {
 		let (byte_idx, bit_mask) = Self::decompose(index);
 		self.store.get_mut(byte_idx as usize).map(|rm| BitRefMut {
@@ -34,27 +45,40 @@ impl PerLineBits {
 	}
 
 
+	/// Retrieves the value of a bit in the array.
+	///
+	/// # Panics
+	///
+	/// This function will panic if the index is out of range.
 	pub fn get(&self, index: u16) -> bool {
 		self.try_get(index).expect("index out of range")
 	}
 
+	/// Retrieves a mutable reference to a bit in the array.
+	///
+	/// # Panics
+	///
+	/// This function will panic if the index is out of range.
 	pub fn get_mut<'a>(&'a mut self, index: u16) -> BitRefMut<'a> {
 		self.try_get_mut(index).expect("index out of range")
 	}
 
+	/// Returns an iterator over all bit values in the array.
 	pub fn iter(&self) -> Iter<'_> {
 		Iter::new(self)
 	}
 
+	/// Returns an iterator over **indexes** of all set bits in the array.
 	pub fn iter_set(&self) -> IterSet {
 		IterSet::new(self)
 	}
 
+	/// Returns an iterator over **indexes** of all cleared bits in the array.
 	pub fn iter_clear(&self) -> IterClear {
 		IterClear::new(self)
 	}
 
-
+	// decomposes a logical index into a byte index and bitmask
 	fn decompose(index: u16) -> (u16, u8) {
 		debug_assert!(Self::BYTE_COUNT < u16::MAX as usize);
 
@@ -63,6 +87,9 @@ impl PerLineBits {
 }
 
 
+/// A mutable reference, logically speaking, to a single bit in a byte array.
+///
+/// Returned by the `get_mut` and `try_get_mut` methods on [`PerLineBits`][PerLineBits].
 #[derive(Debug)]
 pub struct BitRefMut<'a> {
 	r#ref: &'a mut u8,
@@ -70,21 +97,26 @@ pub struct BitRefMut<'a> {
 }
 
 impl<'a> BitRefMut<'a> {
+
+	/// Retrieves the bit value (`true` if the bit is set).
 	#[inline]
 	pub fn bit(&self) -> bool {
 		(*self.r#ref & self.bit_mask) != 0
 	}
 
+	/// Sets the bit.
 	#[inline]
 	pub fn set(&mut self) {
 		*self.r#ref |= self.bit_mask;
 	}
 
+	/// Clears the bit.
 	#[inline]
 	pub fn clear(&mut self) {
 		*self.r#ref &= !self.bit_mask;
 	}
 
+	/// Sets the bit if `value` is true and clears it if not.
 	#[inline]
 	pub fn set_to(&mut self, value: bool) {
 		if value { self.set() } else { self.clear() }
@@ -92,6 +124,9 @@ impl<'a> BitRefMut<'a> {
 }
 
 
+/// An iterator over all bit values.
+///
+/// Constructed by the `iter` method on [`PerLineBits`][PerLineBits].
 #[derive(Debug)]
 pub struct Iter<'a> {
 	bytes: slice::Iter<'a, u8>,
@@ -132,6 +167,8 @@ impl<'a> Iterator for Iter<'a> {
 }
 
 
+/// Implementing struct for `IterSet` and `IterClear`.
+#[doc(hidden)]
 pub struct IterFiltered<'a, const S: bool = true> {
 	upper: iter::Enumerate<iter::Copied<slice::Iter<'a, u8>>>,
 	cur_byte: Option<(usize, u8)>,
@@ -154,7 +191,7 @@ impl<'a, const S: bool> fmt::Debug for IterFilteredPos<'a, S> {
 		match self.0.cur_byte {
 			Some((idx, byte)) => write!(f, "{}/{:02x}", idx, byte),
 			None => f.write_str("None"),
-		}	
+		}
 	}
 }
 
@@ -168,6 +205,7 @@ impl<'a, const S: bool> IterFiltered<'a, S> {
 		}
 	}
 
+	// if the byte is set to this, don't bother checking individual bits
 	const fn skip_clue() -> u8 {
 		if S { 0x00 } else { 0xff }
 	}
@@ -227,7 +265,9 @@ impl<'a, const S: bool> Iterator for IterFiltered<'a, S> {
 	}
 }
 
+/// Iterates over the indexes of all set bits.
 pub type IterSet<'a> = IterFiltered<'a, true>;
+/// Iterates over the indexes of all cleared bits.
 pub type IterClear<'a> = IterFiltered<'a, false>;
 
 
