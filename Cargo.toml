@@ -4,9 +4,6 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Simon Harris <simon@pearfalse.com>"]
 
-[features]
-unstable = []
-
 [dependencies]
 gumdrop = "0.8"
 ascii = "1.0"
@@ -14,6 +11,7 @@ arrayvec = "0.7"
 thiserror = "1.0"
 static_assertions = "1.1"
 nonzero_ext = "0.3"
+sptr = ">= 0.3"
 
 [profile.release]
 lto = true

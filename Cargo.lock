@@ -22,6 +22,7 @@ dependencies = [
  "ascii",
  "gumdrop",
  "nonzero_ext",
+ "sptr",
  "static_assertions",
  "thiserror",
 ]
@@ -69,6 +70,12 @@ checksum = "a1feb54ed693b93a84e14094943b84b7c4eae204c512b7ccb95ab0c66d278ad1"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "sptr"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b9b39299b249ad65f3b7e96443bad61c02ca5cd3589f46cb6d610a0fd6c0d6a"
 
 [[package]]
 name = "static_assertions"

@@ -1,5 +1,3 @@
-#![cfg_attr(feature = "unstable", feature(strict_provenance))]
-
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::fs;
