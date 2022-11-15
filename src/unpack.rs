@@ -152,7 +152,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			}
 
 			// check for existing bytes to yield as-is
-			if let Some(b) = self.byte_flush.pop_at(0) {
+			if let Some(b) = self.byte_flush.pop_front() {
 				self.buffer.push(b);
 				continue;
 			}

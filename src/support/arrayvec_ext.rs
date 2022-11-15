@@ -27,10 +27,9 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 
 		// reduce the length by 1, then move all items up one place
 		unsafe {
-			self.set_len(0);
-			for i in 0..new_len {
-				ptr::write(self.as_mut_ptr().add(i), ptr::read(self.as_ptr().add(i+1)));
-			}
+			let dst = self.as_mut_ptr();
+			let src = dst.cast_const().add(1);
+			ptr::copy(src, dst, new_len);
 			self.set_len(new_len);
 		}
 
@@ -63,7 +62,7 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 			// pre-declare src and dst pointers to keep miri happy (it seems to dislike fetching
 			// two pointers inline due to the side-by-side method calls to `&self` and `&mut self`)
 			let dst = self.as_mut_ptr();
-			let src = (dst as *const T).add(x);
+			let src = dst.cast_const().add(x);
 			ptr::copy(src, dst, new_len);
 			self.set_len(new_len);
 		}
