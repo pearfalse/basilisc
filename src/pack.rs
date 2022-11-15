@@ -12,7 +12,7 @@ use crate::support::{NextByte, TokenIter, ArrayVecExt};
 mod gaps;
 use gaps::*;
 
-const MAX_LINE_LEN: usize = u8::MAX as usize;
+const MAX_LINE_LEN: usize = 251;
 const LINE_NUMBER_CAP: u16 = 0xff00;
 
 #[derive(Debug, thiserror::Error)]
