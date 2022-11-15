@@ -7,7 +7,7 @@ use std::{num::NonZeroU16, io};
 use arrayvec::ArrayVec;
 use nonzero_ext::nonzero;
 
-use crate::support::{NextByte, TokenIter, ArrayVecExt};
+use crate::support::{NextByte, TokenIter, ArrayVecExt as _};
 
 mod gaps;
 use gaps::*;
@@ -424,7 +424,7 @@ impl TokenScan {
 
 		// if pinch is empty and buffer isn't, we're still flushing
 		if self.pinch.is_empty() {
-			if let next @ Some(_) = self.bytes.pop_at(0) {
+			if let next @ Some(_) = self.bytes.pop_front() {
 				return next;
 			}
 			// if here, we've finished flushing known-not-token bytes

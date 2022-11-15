@@ -1,4 +1,4 @@
-use std::{mem::{ManuallyDrop, self, MaybeUninit}, ptr};
+use std::{mem::{ManuallyDrop, self, MaybeUninit}, ptr, slice};
 
 use arrayvec::ArrayVec;
 
@@ -27,8 +27,11 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 
 		// reduce the length by 1, then move all items up one place
 		unsafe {
+			self.set_len(0);
+			for i in 0..new_len {
+				ptr::write(self.as_mut_ptr().add(i), ptr::read(self.as_ptr().add(i+1)));
+			}
 			self.set_len(new_len);
-			ptr::copy(self.as_ptr().add(1), self.as_mut_ptr(), new_len);
 		}
 
 		Some(ManuallyDrop::into_inner(ret))
@@ -49,13 +52,19 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 		if must_drop {
 			// copy items to here for dropping later
 			unsafe {
-				ptr::copy(self.as_ptr(), drop_sites[0].as_mut_ptr(), x);
+				let dst = slice::from_raw_parts_mut(drop_sites.as_mut_ptr(), x)
+					as *mut [MaybeUninit<T>] as *mut T;
+				ptr::copy(self.as_ptr(), dst, x);
 			}
 		}
 
+		// copy other elements down
 		unsafe {
-			let data = self.as_mut_ptr();
-			std::ptr::copy(data.add(x), data, new_len);
+			// pre-declare src and dst pointers to keep miri happy (it seems to dislike fetching
+			// two pointers inline due to the side-by-side method calls to `&self` and `&mut self`)
+			let dst = self.as_mut_ptr();
+			let src = (dst as *const T).add(x);
+			ptr::copy(src, dst, new_len);
 			self.set_len(new_len);
 		}
 
@@ -124,7 +133,9 @@ mod test_arrayvec_ext {
 		#[doc(hidden)]
 		fn _mark_dropped(&self) {
 			// assert this one was not already dropped
-			assert_eq!(0, self.slots.get() & self.mask);
+			assert_eq!(0, self.slots.get() & self.mask,
+				"slot {:08x} (index {}) was already dropped", self.mask, self.index());
+			eprintln!("dropping index {}", self.index());
 			self.slots.set(self.slots.get() | self.mask);
 		}
 	}
