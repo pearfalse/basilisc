@@ -3,6 +3,9 @@ use std::{io, convert::Infallible};
 mod per_line_bits;
 pub(crate) use per_line_bits::*;
 
+mod arrayvec_ext;
+pub(crate) use arrayvec_ext::ArrayVecExt;
+
 pub trait NextByte {
 	type Error;
 	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error>;
@@ -38,44 +41,6 @@ impl<'a> NextByte for std::slice::Iter<'a, u8> {
 
 	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
 		Ok(self.next().copied())
-	}
-}
-
-
-pub(crate) trait ArrayVecExt {
-	fn remove_first(&mut self, x: usize);
-}
-
-impl<T, const N: usize> ArrayVecExt for arrayvec::ArrayVec<T, N> {
-	fn remove_first(&mut self, x: usize) {
-		let old_len = self.len();
-		let new_len = old_len.checked_sub(x as usize)
-			.unwrap_or_else(|| panic!("couldn't remove {} elements from a {}-wide ArrayVec",
-				x, old_len));
-		unsafe {
-			let data = self.as_mut_ptr();
-			std::ptr::copy(data.add(x), data, new_len);
-			self.set_len(new_len);
-		}
-	}
-}
-
-#[cfg(test)]
-mod test_arrayvec_ext {
-    use arrayvec::ArrayVec;
-
-    use super::ArrayVecExt;
-
-	#[test]
-	fn remove_first() {
-		let mut av: ArrayVec<u8, 9> = ArrayVec::new();
-		for i in 20..29 {
-			av.push(i);
-		}
-
-		av.remove_first(3);
-
-		assert_eq!(&[23, 24, 25, 26, 27, 28], &*av);
 	}
 }
 
