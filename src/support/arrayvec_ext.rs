@@ -53,7 +53,7 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 			unsafe {
 				let dst = slice::from_raw_parts_mut(drop_sites.as_mut_ptr(), x)
 					as *mut [MaybeUninit<T>] as *mut T;
-				ptr::copy(self.as_ptr(), dst, x);
+				ptr::copy_nonoverlapping(self.as_ptr(), dst, x);
 			}
 		}
 
