@@ -557,6 +557,18 @@ mod test_token_scan {
 		let result = scanner.collect::<TokenScanBuffer>();
 		assert_eq!(&[0xe0u8][..], &*result);
 	}
+
+	#[test]
+	fn must_be_word_start() {
+		let mut scanner = TokenScan::new();
+		for &b in b"T.TOLEMY" {
+			scanner.narrow(b);
+		}
+		scanner.flush();
+
+		let result = scanner.collect::<TokenScanBuffer>();
+		assert_eq!(b"T.\xb8LEMY", &*result);
+	}
 }
 
 
