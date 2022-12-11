@@ -52,8 +52,8 @@ impl Keyword {
 			.filter(|l| l.get() <= MAX_LEN)
 			// length is good, get the byte slice and let's have a look
 			.map(|len| &src[..len.get() as usize])
-			// all bytes must be 0x21..=0x7f
-			.filter(|s| s.iter().all(|b| (0x20..=0x7f).contains(b)))
+			// all bytes must be 0x21..=0x7e
+			.filter(|s| s.iter().all(|b| (0x21..=0x7e).contains(b)))
 			.ok_or_else(|| src)?;
 
 		// checks pass, we can create this now
