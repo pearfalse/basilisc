@@ -12,6 +12,8 @@ use crate::support::{NextByte, TokenIter, ArrayVecExt as _};
 mod gaps;
 use gaps::*;
 
+mod token_scan;
+
 const MAX_LINE_LEN: usize = 251;
 const LINE_NUMBER_CAP: u16 = 0xff00;
 
