@@ -45,7 +45,7 @@ use crate::support::{{RawKeyword, Keyword, TokenIter, SubArray}};
 
 type TokenDecodeMap = SubArray<'static, RawKeyword>;
 
-"#)?;
+"#)?; // TODO: there's no reason to have these be RawKeywords, there's no fallible conversion here
 
 	// write arrays
 	macro_rules! write_array {

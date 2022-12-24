@@ -10,7 +10,8 @@
 //! The character for byte 0x87 has no single-character Unicode equivalent and will be replaced with
 //! SUPERSCRIPT SEVEN (U+2077).
 
-/// A map from RISC OS Latin-1 to Unicode. Each index of this array corresponds to the Latin-1 byte, and the character at that position to its Unicode equivalent.
+/// A map from RISC OS Latin-1 to Unicode. Each index of this array corresponds to the Latin-1 byte,
+/// and the character at that position to its Unicode equivalent.
 static LATIN1_MAP: [char; 256] = [
 	// C0 control codes
 	'\u{2400}', '\u{2401}', '\u{2402}', '\u{2403}', '\u{2404}', '\u{2405}', '\u{2406}', '\u{2407}',
