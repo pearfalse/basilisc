@@ -1,9 +1,10 @@
-use std::mem;
+use std::num::NonZeroU8;
+use std::{fmt, mem};
 
 use arrayvec::ArrayVec;
 
 use crate::token_data::TokenLookupEntry;
-use crate::support::{TokenIter, ArrayVecExt};
+use crate::support::{TokenIter, ArrayVecExt, HexArray};
 
 use super::TokenScanBuffer;
 
@@ -13,12 +14,11 @@ type TokenMatchBuffer = ArrayVec<TokenIter, 2>;
 // chars that didn't match anything
 type MatchFailureChars = ArrayVec<u8, { crate::support::MAX_KEYWORD_LEN as usize }>;
 
-#[derive(Debug)]
 struct TokenScanner {
 	char_buf: TokenScanBuffer,
 	token_buf: TokenMatchBuffer,
 	char_out_buf: MatchFailureChars,
-	best_match: Option<TokenIter>,
+	best_match: Option<&'static TokenLookupEntry>,
 	cur_token: Option<TokenIter>,
 	pinch: &'static [TokenLookupEntry],
 }
@@ -77,6 +77,17 @@ impl TokenScanner {
 		}
 	}
 
+	pub fn flush(self) -> TokenScanBuffer {
+		if let Some((kw, ti)) = self.best_match {
+			let ti = ti.clone();
+			let mut new = TokenScanBuffer::from_iter(ti.map(NonZeroU8::get));
+			new.extend(self.char_buf.into_iter().skip(kw.len().get() as usize));
+			new
+		} else {
+			self.char_buf
+		}
+	}
+
 	fn narrow(&mut self, ch: u8) {
 		let pinch_idx = self.char_buf.len();
 		self.char_buf.push(ch);
@@ -113,19 +124,32 @@ impl TokenScanner {
 			},
 
 			// a good match, but there might be a longer one
-			[(ref kw, ref ti), ..] if kw.as_bytes() == &*self.char_buf => {
+			[ref pair @ (ref kw, _), ..] if kw.as_bytes() == &*self.char_buf => {
+				self.best_match = Some(pair);
 			},
 
 			// confirmed no match; purge all known chars
 			[] => {
-				// TODO this is where the ENDPI case needs handling
-				self.all_chars_in_to_out();
+				if let Some((kw, best)) = self.best_match.take() {
+					// take this subset of characters, use it
+					self.token_buf.push(best.clone());
+
+					// preserve unconsumed chars to re-add them
+					self.char_buf.remove_first(kw.len().get() as usize);
+					self.pinch = PINCH_ALL;
+				}
+				else {
+					// TODO this is where the ENDPI case needs handling
+					self.all_chars_in_to_out();
+				}
 			},
 
 			// still searching, no match yet
 			[_, ..] => {
 			},
-		}
+		};
+
+		dbg!(self);
 	}
 
 	fn all_chars_in_to_out(&mut self) {
@@ -146,6 +170,55 @@ impl Default for TokenScanner {
 	#[inline(always)]
 	fn default() -> Self {
 		Self::new()
+	}
+}
+
+impl fmt::Debug for TokenScanner {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		struct PinchDebug {
+			front: Option<&'static TokenLookupEntry>,
+			back: Option<&'static TokenLookupEntry>,
+			count: usize,
+		}
+
+		impl PinchDebug {
+			fn new(outer: &TokenScanner) -> Self {
+				Self {
+					front: outer.pinch.first(),
+					back: outer.pinch.last(),
+					count: outer.pinch.len(),
+				}
+			}
+		}
+
+		impl fmt::Debug for PinchDebug {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+				if let Some((front, _)) = self.front {
+					write!(f, "\"{}\"", front.as_ascii_str())
+				} else {
+					f.write_str("(start)")
+				}?;
+
+				f.write_str(" to ")?;
+
+				if let Some((back, _)) = self.back {
+					write!(f, "\"{}\"", back.as_ascii_str())
+				} else {
+					f.write_str("(end)")
+				}?;
+
+				write!(f, " (#{})", self.count)
+			}
+		}
+
+		f.debug_struct("TokenScanner")
+			.field("char_buf", &HexArray(&*self.char_buf))
+			.field("token_buf", &&*self.token_buf)
+			.field("char_out_buf", &&*self.char_out_buf)
+			.field("best_match", &self.best_match)
+			.field("cur_token", &self.cur_token)
+			.field("pinch", &PinchDebug::new(self))
+			.finish()
 	}
 }
 
@@ -203,6 +276,23 @@ mod tests {
 	}
 
 	#[test]
+	fn smush_cannot_match_longer() {
+		assert_eq!(b"\x97II", &*_inout(b"ASCII"));
+	}
+
+	#[test]
+	fn smush_could_last_longer() {
+		assert_eq!(b"\xe0ING", &*_inout(b"ENDING"));
+	}
+
+	#[test]
+	fn not_in_middle() {
+		const SRC: &'static [u8] = b"PTOLEMY"; // `TO` should not tokenise
+		let out_buf = _inout(SRC);
+		assert_eq!(SRC, &*out_buf);
+	}
+
+	#[test]
 	fn everyones_favourite_awful_edge_case() {
 		// the text ENDPI switches from looking like `ENDPROC` to being `END` + `PI` in a single
 		// char input :(
@@ -214,5 +304,26 @@ mod tests {
 
 		assert_eq!(Some(0xe0), scanner.try_pull());
 		assert_eq!(Some(0xaf), scanner.try_pull());
+	}
+
+
+	fn _inout(src: &[u8]) -> Vec<u8> {
+		let mut scanner = TokenScanner::new();
+		let mut out_buf = Vec::with_capacity(src.len());
+		macro_rules! pull_all {
+			() => {
+				while let Some(b) = scanner.try_pull() {
+					out_buf.push(b);
+				}
+			};
+		}
+
+		for &ch in src {
+			pull_all!();
+			scanner.push(ch);
+		}
+		pull_all!();
+		for b in scanner.flush() { out_buf.push(b) };
+		out_buf
 	}
 }

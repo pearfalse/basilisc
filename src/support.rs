@@ -1,4 +1,5 @@
-use std::{io, convert::Infallible};
+use core::fmt;
+use std::{io, convert::Infallible, fmt::Write};
 
 mod per_line_bits;
 pub(crate) use per_line_bits::*;
@@ -43,6 +44,25 @@ impl<'a> NextByte for std::slice::Iter<'a, u8> {
 		Ok(self.next().copied())
 	}
 }
+
+
+pub(crate) struct HexArray<'a>(pub &'a [u8]);
+
+impl<'a> fmt::Debug for HexArray<'a> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_char('[')?;
+		let mut show_comma = false;
+		for &b in self.0 {
+			if show_comma {
+				f.write_str(", ")?;
+			}
+			show_comma = true;
+			write!(f, "{:02x}", b)?;
+		}
+		f.write_char(']')
+	}
+}
+
 
 
 // include meta-src files that we want
