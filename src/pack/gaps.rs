@@ -1,9 +1,8 @@
 use std::marker::PhantomData;
 
-use super::UnnumberedLine;
-
-#[allow(unstable_name_collisions)]
 use sptr::Strict;
+
+use super::UnnumberedLine;
 
 #[derive(Debug)]
 pub(super) struct Gap<'a> {
@@ -30,6 +29,7 @@ impl<'a> FindGaps<'a> {
 	}
 
 	fn sp_addr(&self, addr: &UnnumberedLine) -> *mut UnnumberedLine {
+		#![allow(unstable_name_collisions)]
 		self.start.with_addr((addr as *const UnnumberedLine).addr())
 	}
 }
