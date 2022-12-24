@@ -63,6 +63,12 @@ impl<'a> fmt::Debug for HexArray<'a> {
 	}
 }
 
+impl<'a> fmt::Display for HexArray<'a> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		<Self as fmt::Debug>::fmt(self, f)
+	}
+}
+
 
 
 // include meta-src files that we want

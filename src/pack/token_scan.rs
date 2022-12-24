@@ -6,18 +6,16 @@ use arrayvec::ArrayVec;
 use crate::token_data::TokenLookupEntry;
 use crate::support::{TokenIter, ArrayVecExt, HexArray};
 
-use super::TokenScanBuffer;
-
 // there is a known pathological case where 2 tokens appear for one byte, but that should be it
 type TokenMatchBuffer = ArrayVec<TokenIter, 2>;
 
 // chars that didn't match anything
-type MatchFailureChars = ArrayVec<u8, { crate::support::MAX_KEYWORD_LEN as usize }>;
+type CharBuffer = ArrayVec<u8, { crate::support::MAX_KEYWORD_LEN as usize + 1 }>;
 
 struct TokenScanner {
-	char_buf: TokenScanBuffer,
+	char_buf: CharBuffer,
 	token_buf: TokenMatchBuffer,
-	char_out_buf: MatchFailureChars,
+	char_out_buf: CharBuffer,
 	best_match: Option<&'static TokenLookupEntry>,
 	cur_token: Option<TokenIter>,
 	pinch: &'static [TokenLookupEntry],
@@ -28,9 +26,9 @@ static PINCH_ALL: &'static [TokenLookupEntry] = crate::token_data::LOOKUP_MAP.as
 impl TokenScanner {
 	pub fn new() -> Self {
 		Self {
-			char_buf: TokenScanBuffer::new(),
+			char_buf: CharBuffer::new(),
 			token_buf: TokenMatchBuffer::new(),
-			char_out_buf: MatchFailureChars::new(),
+			char_out_buf: CharBuffer::new(),
 			best_match: None,
 			cur_token: None,
 			pinch: PINCH_ALL,
@@ -72,15 +70,16 @@ impl TokenScanner {
 			},
 			(false, false) => {
 				// this char will never match; flush all consideration chars
-				self.all_chars_in_to_out();
+				self.commit_best_match();
+				self.char_buf.push(ch);
 			},
 		}
 	}
 
-	pub fn flush(self) -> TokenScanBuffer {
+	pub fn flush(self) -> CharBuffer {
 		if let Some((kw, ti)) = self.best_match {
 			let ti = ti.clone();
-			let mut new = TokenScanBuffer::from_iter(ti.map(NonZeroU8::get));
+			let mut new = CharBuffer::from_iter(ti.map(NonZeroU8::get));
 			new.extend(self.char_buf.into_iter().skip(kw.len().get() as usize));
 			new
 		} else {
@@ -130,39 +129,38 @@ impl TokenScanner {
 
 			// confirmed no match; purge all known chars
 			[] => {
-				if let Some((kw, best)) = self.best_match.take() {
-					// take this subset of characters, use it
-					self.token_buf.push(best.clone());
-
-					// preserve unconsumed chars to re-add them
-					self.char_buf.remove_first(kw.len().get() as usize);
-					self.pinch = PINCH_ALL;
-				}
-				else {
-					// TODO this is where the ENDPI case needs handling
-					self.all_chars_in_to_out();
-				}
+				self.commit_best_match();
 			},
 
 			// still searching, no match yet
 			[_, ..] => {
 			},
 		};
-
-		dbg!(self);
 	}
 
-	fn all_chars_in_to_out(&mut self) {
-		self.char_out_buf.extend(mem::replace(
-			&mut self.char_buf, TokenScanBuffer::new()
-		).into_iter());
+	fn commit_best_match(&mut self) {
+		if let Some((kw, best)) = self.best_match.take() {
+			// take this subset of characters, use it
+			self.token_buf.push(best.clone());
+
+			// preserve unconsumed chars to re-add them
+			self.char_buf.remove_first(kw.len().get() as usize);
+			self.pinch = PINCH_ALL;
+		}
+		else {
+			// move all chars as-is
+			self.char_out_buf.extend(mem::replace(
+				&mut self.char_buf, Default::default()
+				).into_iter());
+		}
 	}
 
 	fn is_keyword_char(ch: u8) -> bool {
 		// it's variable validity that matters here; getting one of these with an empty pinch
 		// is *not* a case where we can reset the tokeniser
 		// @ is not included; @% is an edge case, but not one we need to worry about
-		matches!(ch, b'A'..=b'Z' | b'a'..=b'z' | b'_')
+		matches!(ch, b'A'..=b'Z' | b'a'..=b'z')
+			|| b"_$(.".contains(&ch)
 	}
 }
 
@@ -286,6 +284,12 @@ mod tests {
 	}
 
 	#[test]
+	fn inkey() {
+		assert_eq!(b"\xa6#", &*_inout(b"INKEY#"));
+		assert_eq!(b"\xbf", &*_inout(b"INKEY$"));
+	}
+
+	#[test]
 	fn not_in_middle() {
 		const SRC: &'static [u8] = b"PTOLEMY"; // `TO` should not tokenise
 		let out_buf = _inout(SRC);
@@ -308,6 +312,11 @@ mod tests {
 
 
 	fn _inout(src: &[u8]) -> Vec<u8> {
+		if let Ok(s) = ascii::AsAsciiStr::as_ascii_str(src) {
+			println!("src: {}", s);
+		} else {
+			println!("src: {}", HexArray(src));
+		}
 		let mut scanner = TokenScanner::new();
 		let mut out_buf = Vec::with_capacity(src.len());
 		macro_rules! pull_all {
