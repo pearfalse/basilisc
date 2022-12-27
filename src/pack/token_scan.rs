@@ -79,15 +79,17 @@ impl TokenScanner {
 		}
 	}
 
-	pub fn flush(self) -> CharBuffer {
+	pub fn flush(&mut self) {
 		if let Some((kw, ti)) = self.best_match {
+			// crush best_match chars into token equiv
 			let ti = ti.clone();
-			let mut new = CharBuffer::from_iter(ti.map(NonZeroU8::get));
-			new.extend(self.char_buf.into_iter().skip(kw.len().get() as usize));
-			new
-		} else {
-			self.char_buf
+			self.char_out_buf.extend(ti.map(NonZeroU8::get));
+			self.char_out_buf.extend(self.char_buf.iter().copied().skip(kw.len().get() as usize));
 		}
+		else {
+			self.char_out_buf.extend(self.char_buf.iter().copied());
+		}
+		self.char_buf.clear();
 	}
 
 	fn narrow(&mut self, ch: u8) {
@@ -322,20 +324,15 @@ mod tests {
 		}
 		let mut scanner = TokenScanner::new();
 		let mut out_buf = Vec::with_capacity(src.len());
-		macro_rules! pull_all {
-			() => {
-				while let Some(b) = scanner.try_pull() {
-					out_buf.push(b);
-				}
-			};
-		}
 
 		for &ch in src {
-			pull_all!();
+			scanner.try_pull().map(|b| out_buf.push(b));
 			scanner.push(ch);
 		}
-		pull_all!();
-		for b in scanner.flush() { out_buf.push(b) };
+		scanner.flush();
+		while let Some(b) = scanner.try_pull() {
+			out_buf.push(b);
+		}
 		out_buf
 	}
 }
