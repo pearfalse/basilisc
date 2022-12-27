@@ -13,7 +13,7 @@ use crate::{
 type TokenMatchBuffer = ArrayVec<TokenIter, 2>;
 
 // chars that didn't match anything
-type CharBuffer = ArrayVec<u8, { crate::keyword::MAX_LEN as usize + 1 }>;
+type CharBuffer = ArrayVec<u8, { crate::keyword::MAX_LEN as usize }>;
 
 struct TokenScanner {
 	char_buf: CharBuffer,
@@ -308,6 +308,18 @@ mod tests {
 	}
 
 	#[test]
+	fn char_out_buf_limits() {
+		static SRC: &'static [u8] = b"OTHERWISOTHERWISOTHERWISOTHERWIS";
+		const CHUNK: usize = 8;
+
+		for limit in (1..(SRC.len())).step_by(CHUNK) {
+			let src = &SRC[..limit];
+
+			assert_eq!(src, &*_inout(src));
+		}
+	}
+
+	#[test]
 	#[ignore = "this will come later"]
 	fn everyones_favourite_awful_edge_case() {
 		// the text ENDPI switches from looking like `ENDPROC` to being `END` + `PI` in a single
@@ -326,8 +338,8 @@ mod tests {
 		let mut out_buf = Vec::with_capacity(src.len());
 
 		for &ch in src {
-			scanner.try_pull().map(|b| out_buf.push(b));
 			scanner.push(ch);
+			scanner.try_pull().map(|b| out_buf.push(b));
 		}
 		scanner.flush();
 		while let Some(b) = scanner.try_pull() {
