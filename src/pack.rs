@@ -202,7 +202,7 @@ impl<I> Parser<I> where
 		Ok(Some(final_line_number))
 	}
 
-	pub fn write(mut self, target: &mut dyn io::Write) -> Result<()> {
+	pub fn write(self, target: &mut dyn io::Write) -> Result<()> {
 		let lines = self.into_lines()?;
 
 		for line in lines {

@@ -8,8 +8,6 @@ mod cooked_keyword;
 mod test_lookup {
 	// These tests are for lookups on generated data
 
-	use super::cooked_keyword::Keyword;
-
 	use crate::{
 		keyword::{RawKeyword, TokenPosition},
 		subarray::{SubArray, traits::*},
@@ -30,7 +28,7 @@ mod test_lookup {
 				kw.map(|k| k.as_ascii_str().as_bytes())
 			);
 		}
-		assert_eq!(None, TOKEN_MAP_DIRECT.get(0x8d));
+		assert_eq!(None, TOKEN_MAP_DIRECT.get_flat(0x8d));
 	}
 
 	#[test]
@@ -44,9 +42,8 @@ mod test_lookup {
 			(&TOKEN_MAP_C8, 0x99u8, "SYS"),
 		];
 		for (arr, byte, word) in data.into_iter() {
-			let kw = Keyword::try_new(byte, word, None, TokenPosition::Any).unwrap();
-			assert_eq!(word, kw.keyword());
-			assert_eq!(byte, kw.byte().get());
+			let kw = arr.get_flat(byte as usize).unwrap();
+			assert_eq!(word, kw.as_ascii_str().as_str());
 		}
 	}
 
@@ -71,8 +68,8 @@ mod test_lookup {
 		use super::LINE_DEPENDENT_KEYWORD_BYTES;
 		for keyword in ["GOTO", "GOSUB"] {
 			let byte = TOKEN_MAP_DIRECT.full_iter()
-				.flat_map(Option::as_ref)
-				.position(|k| k.as_ascii_str().as_bytes() == keyword.as_bytes())
+				.position(|mk| mk.map(|k| k.as_ascii_str().as_bytes() == keyword.as_bytes())
+					== Some(true))
 				.and_then(|u| u8::try_from(u).ok())
 				.unwrap();
 			assert!(LINE_DEPENDENT_KEYWORD_BYTES.iter().find(|&&l| l == byte).is_some(),

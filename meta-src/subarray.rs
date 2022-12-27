@@ -29,7 +29,7 @@ impl<'a, T> SubArray<'a, T> {
 	}
 }
 
-impl<'a, T: Default + Copy> SubArray<'a, T> {
+impl<'a, T> SubArray<'a, Option<T>> {
 	pub fn full_iter(&self) -> FullIter<'a, T> {
 		FullIter::new(self)
 	}
@@ -44,12 +44,12 @@ impl<'a, T> Index<usize> for SubArray<'a, T> {
 }
 
 pub struct FullIter<'a, T> {
-	slice: core::slice::Iter<'a, T>,
+	slice: core::slice::Iter<'a, Option<T>>,
 	skip_count: Option<NonZeroUsize>,
 }
 
-impl<'a, T: Default + Copy> FullIter<'a, T> {
-	fn new(src: &SubArray<'a, T>) -> Self {
+impl<'a, T> FullIter<'a, T> {
+	fn new(src: &SubArray<'a, Option<T>>) -> Self {
 		Self {
 			slice: src.slice.iter(),
 			skip_count: NonZeroUsize::new(src.from),
@@ -57,16 +57,16 @@ impl<'a, T: Default + Copy> FullIter<'a, T> {
 	}
 }
 
-impl<'a, T: Default + Copy> Iterator for FullIter<'a, T> {
-	type Item = &'a T;
+impl<'a, T> Iterator for FullIter<'a, T> {
+	type Item = Option<&'a T>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if let Some(old) = self.skip_count {
 			// don't return anything
 			self.skip_count = NonZeroUsize::new(old.get() - 1);
-			None
+			Some(None)
 		} else {
-			self.slice.next()
+			self.slice.next().map(Option::as_ref)
 		}
 	}
 }
@@ -118,11 +118,13 @@ mod test {
 
 	#[test]
 	fn full_iter() {
-		let sut = SubArray::new(&[1, 2, 3], 2);
-		let result: Vec<_> = sut.full_iter().copied().collect();
+		let sut = SubArray::new(&[Some(1i32), Some(2), Some(3)], 2);
+		let result: Vec<i32> = sut.full_iter()
+			.map(|oi| oi.copied().unwrap_or(0))
+			.collect();
 		assert_eq!(&[0, 0, 1, 2, 3], &*result);
 
-		let sut = SubArray::new(&[5], 0);
-		assert_eq!(Some(5), sut.full_iter().copied().next());
+		let sut = SubArray::new(&[Some(5)], 0);
+		assert_eq!(Some(&5), sut.full_iter().next().flatten());
 	}
 }
