@@ -68,19 +68,3 @@ impl<'a> fmt::Display for HexArray<'a> {
 		<Self as fmt::Debug>::fmt(self, f)
 	}
 }
-
-
-
-// include meta-src files that we want
-#[path = "../meta-src/keyword.rs"] mod keyword;
-#[path = "../meta-src/token_iter.rs"] mod token_iter;
-#[path = "../meta-src/subarray.rs"] mod subarray;
-
-pub(crate) use keyword::{
-	RawKeyword,
-	Keyword,
-	IntoIter as KeywordIntoIter,
-	MAX_LEN as MAX_KEYWORD_LEN,
-};
-pub(crate) use token_iter::TokenIter;
-pub(crate) use subarray::SubArray;

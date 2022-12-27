@@ -3,6 +3,7 @@ use std::io;
 
 use crate::{
 	support::*,
+	keyword,
 	token_data,
 	line_numbers,
 };
@@ -102,7 +103,7 @@ pub struct Parser<I> {
 	/// Buffer for potential lookups that didn't match anything, or for format hacks
 	byte_flush: ByteFlush,
 	/// Iterator for remaining characters of a previous lookup match
-	cur_token: KeywordIntoIter,
+	cur_token: keyword::IntoIter,
 	/// Have we reached the end of the BASIC file?
 	have_reached_end: bool,
 	/// Are we in a string literal? (if so, don't expand tokens)
@@ -123,7 +124,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			line_ref: None,
 			token_lookup: None,
 			byte_flush: ArrayVec::new_const(),
-			cur_token: KeywordIntoIter::empty(),
+			cur_token: keyword::IntoIter::empty(),
 			have_reached_end: false,
 			string_state: StringState::default(),
 			extant_lines: PerLineBits::new(),
@@ -279,23 +280,24 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 	}
 
 	fn update_lookup_stage(&mut self, next_byte: u8) -> Option<u8> {
+		use crate::subarray::traits::SubArrayFlat;
 		debug_assert!(self.cur_token.clone().next().is_none());
 
 		let (decode_map, byte_if_fail) = match self.token_lookup.take() {
-			Some(0xc6) => (&token_data::TOKEN_MAP_C6, Some(0xc6)),
-			Some(0xc7) => (&token_data::TOKEN_MAP_C7, Some(0xc7)),
-			Some(0xc8) => (&token_data::TOKEN_MAP_C8, Some(0xc8)),
+			Some(0xc6) => (token_data::TOKEN_MAP_C6, Some(0xc6)),
+			Some(0xc7) => (token_data::TOKEN_MAP_C7, Some(0xc7)),
+			Some(0xc8) => (token_data::TOKEN_MAP_C8, Some(0xc8)),
 			None if (0xc6..=0xc8).contains(&next_byte) => {
 				// indirect will finish next round
 				self.token_lookup = Some(next_byte);
 				return None;
 			},
-			None => (&token_data::TOKEN_MAP_DIRECT, None),
+			None => (token_data::TOKEN_MAP_DIRECT, None),
 			_ => return Some(next_byte),
 		};
 
 		// try lookup and conversion to token
-		match decode_map.get(next_byte as usize).and_then(|bytes| Keyword::try_new(*bytes).ok()) {
+		match decode_map.get_flat(next_byte as usize) {
 			Some(s) => {
 				self.cur_token = s.into_iter();
 			},

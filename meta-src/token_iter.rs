@@ -2,7 +2,7 @@ use core::num::NonZeroU8;
 use std::{iter::FusedIterator, fmt};
 
 /// An interator optimised for yielding a BBC BASIC token.
-#[derive(Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub(crate) struct TokenIter {
 	a: Option<NonZeroU8>,
 	b: Option<NonZeroU8>,

@@ -2,15 +2,19 @@ use std::num::NonZeroU8;
 use std::{fmt, mem};
 
 use arrayvec::ArrayVec;
+use ascii::AsAsciiStr;
 
 use crate::token_data::TokenLookupEntry;
-use crate::support::{TokenIter, ArrayVecExt, HexArray};
+use crate::{
+	token_iter::TokenIter,
+	support::{ArrayVecExt, HexArray},
+};
 
 // there is a known pathological case where 2 tokens appear for one byte, but that should be it
 type TokenMatchBuffer = ArrayVec<TokenIter, 2>;
 
 // chars that didn't match anything
-type CharBuffer = ArrayVec<u8, { crate::support::MAX_KEYWORD_LEN as usize + 1 }>;
+type CharBuffer = ArrayVec<u8, { crate::keyword::MAX_LEN as usize + 1 }>;
 
 struct TokenScanner {
 	char_buf: CharBuffer,
@@ -93,7 +97,8 @@ impl TokenScanner {
 
 		// front byte first
 		while let Some((left, remain)) = self.pinch.split_first() {
-			if left.0.as_bytes().get(pinch_idx as usize).map(|&b| b < ch) != Some(false) {
+			if left.0.as_ascii_str().as_bytes()
+			.get(pinch_idx as usize).map(|&b| b < ch) != Some(false) {
 				// not yet narrowed down to matching substrings
 				self.pinch = remain;
 			} else {
@@ -103,7 +108,8 @@ impl TokenScanner {
 
 		// then back byte
 		while let Some((right, remain)) = self.pinch.split_last() {
-			if right.0.as_bytes().get(pinch_idx as usize).map(|&b| b > ch) == Some(true) {
+			if right.0.as_ascii_str().as_bytes()
+			.get(pinch_idx as usize).map(|&b| b > ch) == Some(true) {
 				// too flabby on the right
 				self.pinch = remain;
 			} else {
@@ -113,9 +119,13 @@ impl TokenScanner {
 	}
 
 	fn try_extract(&mut self) {
+		macro_rules! eq_char_buf {
+			($kw:expr) => { $kw.as_bytes() == &*self.char_buf };
+		}
+
 		match *self.pinch {
 			// perfect match, greedy match
-			[(ref kw, ref ti)] if kw.as_bytes() == &*self.char_buf => {
+			[(ref kw, ref ti)] if eq_char_buf!(kw) => {
 				self.best_match = None; // forget that, we have a definite winner
 				self.token_buf.push(ti.clone());
 				self.char_buf.clear(); // all bytes accounted for
@@ -123,7 +133,7 @@ impl TokenScanner {
 			},
 
 			// a good match, but there might be a longer one
-			[ref pair @ (ref kw, _), ..] if kw.as_bytes() == &*self.char_buf => {
+			[ref pair @ (ref kw, _), ..] if eq_char_buf!(kw) => {
 				self.best_match = Some(pair);
 			},
 
@@ -300,14 +310,7 @@ mod tests {
 	fn everyones_favourite_awful_edge_case() {
 		// the text ENDPI switches from looking like `ENDPROC` to being `END` + `PI` in a single
 		// char input :(
-		let mut scanner = TokenScanner::new();
-		for &ch in b"ENDPI" {
-			assert_eq!(None, scanner.try_pull());
-			scanner.push(ch);
-		}
-
-		assert_eq!(Some(0xe0), scanner.try_pull());
-		assert_eq!(Some(0xaf), scanner.try_pull());
+		assert_eq!(b"\xe0\xaf", &*_inout(b"ENDPI"));
 	}
 
 

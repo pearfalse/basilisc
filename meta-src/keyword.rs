@@ -1,74 +1,103 @@
 #![allow(dead_code)] // neither build.rs nor bin crate will ever use 100% of methods here
 
-use std::{fmt, num::NonZeroU8, convert::TryFrom, mem};
+use std::{fmt, num::NonZeroU8, mem};
 
 use ascii::AsciiStr;
 
 pub const MAX_LEN: u8 = 9;
 pub const STORE_SIZE: u8 = 12;
 
-/// The raw storage for a keyword.
-pub(crate) type RawKeyword = [u8; STORE_SIZE as usize];
-
 /// A BASIC keyword, accessed through some backing store.
 ///
 /// This type provides interfaces to BASIC keywords that are referenced from some fixed-size
 /// backing store, which `Keyword` may own or borrow.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 #[repr(C)]
-pub(crate) struct Keyword {
+pub(crate) struct RawKeyword {
 	/// Actual meaningful characters
 	chars: [u8; MAX_LEN as usize],
-	/// Unused padding byte (should be 0)
-	_padding: u8,
+	/// Flags
+	///
+	/// - b7: only if as an lvalue
+	/// - b6 to b4: unused, must be 0
+	/// - b3 to b0: minimum abbreviation length (if 0, no abbrev)
+	flags: u8,
 	/// Iteration indexing state
 	iter_state: u8,
 	/// Length of string (number of meaningful bytes in `chars`)
 	len: NonZeroU8,
 }
 
+impl PartialEq for RawKeyword {
+	fn eq(&self, other: &Self) -> bool {
+		self.assert_iter_state();
+		other.assert_iter_state();
+		Self::eq_guts(self, other)
+	}
+}
+
+impl Eq for RawKeyword {}
+
+impl PartialOrd for RawKeyword {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+	    Some(<Self as Ord>::cmp(self, other))
+	}
+}
+
+impl Ord for RawKeyword {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		use std::cmp::Ordering;
+
+		macro_rules! sort_this {
+			($op:expr) => {
+				match (&$op(self)).cmp(&$op(other)) {
+					Ordering::Equal => {},
+					other => return other,
+				};
+			};
+		}
+
+		sort_this!(RawKeyword::as_bytes);
+		sort_this!(|k: &RawKeyword| k.flags & (flags::LVALUE_ONLY | flags::RVALUE_ONLY));
+
+		// at this point, there should be no other meaningful changes!
+		debug_assert!(self.min_abbrev() == other.min_abbrev());
+		Ordering::Equal
+	}
+}
+
+pub(crate) mod flags {
+	pub const LVALUE_ONLY         : u8 = 1<<7;
+	pub const RVALUE_ONLY         : u8 = 1<<6;
+	pub const MIN_ABBREV_LEN_MASK : u8 = 0b1111;
+
+	pub const RESERVED: u8 = !(LVALUE_ONLY | RVALUE_ONLY | MIN_ABBREV_LEN_MASK);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+pub(crate) enum TokenPosition {
+	Any,
+	Left,
+	Right,
+}
+
 #[allow(dead_code)]
 #[doc(hidden)]
 fn _assert_struct_size() {
-	static_assertions::assert_eq_size!(RawKeyword, Keyword, Option<Keyword>);
+	static_assertions::assert_eq_size!([u8; STORE_SIZE as usize], RawKeyword, Option<RawKeyword>);
 }
 
-impl fmt::Debug for Keyword {
+impl fmt::Debug for RawKeyword {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "Keyword(\"{}\")", self.as_ascii_str())
+		write!(f, "RawKeyword(\"{}\")", self.as_ascii_str()) // TODO: add flags
 	}
 }
 
-impl Keyword {
-	/// Creates a new `Keyword` from a RawKeyword. The array must consist of the following:
-	///
-	/// - `1..=MAX_LEN` printable ASCII characters at the start;
-	/// - the string length in the last byte (index `MAX_LEN`).
-	///
-	/// This function returns `None` if any of these conditions are not met.
-	pub(crate) fn try_new(mut src: RawKeyword) -> Result<Self, RawKeyword> {
-		let _slice = NonZeroU8::new(src[STORE_SIZE as usize - 1])
-			// length must be non-zero, but also small enough to be meaningful
-			.filter(|l| l.get() <= MAX_LEN)
-			// length is good, get the byte slice and let's have a look
-			.map(|len| &src[..len.get() as usize])
-			// all bytes must be 0x21..=0x7e
-			.filter(|s| s.iter().all(|b| (0x21..=0x7e).contains(b)))
-			.ok_or_else(|| src)?;
-
-		// checks pass, we can create this now
-		src[STORE_SIZE as usize - 2] = 0; // iteration state
-		Ok(unsafe {
-			// SAFETY: we have just validated all required soundness conditions
-			Self::new_unchecked(src)
-		})
-	}
-
+impl RawKeyword {
 	/// Returns populated bytes of a keyword.
-	///
-	/// There are two methods with this name, this one being specialised for borrowing `Keyword`
-	/// instances.
-	pub(crate) fn as_bytes(&self) -> &[u8] {
+	#[inline]
+	pub fn as_bytes(&self) -> &[u8] {
 		let slice: &[u8] = self.chars.as_slice();
 		unsafe {
 			// SAFETY: we don't safely allow construction of byte slices that don't fit
@@ -76,6 +105,11 @@ impl Keyword {
 		}
 	}
 
+	fn eq_guts(a: &Self, b: &Self) -> bool {
+		a.len == b.len && a.flags == b.flags && a.as_bytes() == b.as_bytes()
+	}
+
+	#[inline]
 	/// Returns the length of this keyword.
 	pub(crate) fn len(&self) -> NonZeroU8 { self.len }
 
@@ -90,17 +124,14 @@ impl Keyword {
 		}
 	}
 
-	/// Constructs a `Keyword` without verifying the inner contents.
+	/// Constructs a `RawKeyword` without verifying the inner contents.
 	///
 	/// # Safety
 	///
-	/// All of the following conditions must be met:
-	/// - The underlying data that spans the string must consist of non-NULL ASCII bytes only.
-	/// - The final byte (index `STORE_SIZE - 1`) must be a non-zero value strictly less than or
-	/// equal to `MAX_LEN`.
-	/// - The byte at index `STORE_SIZE - 2` must be 0.
-	pub(crate) const unsafe fn new_unchecked(src: RawKeyword) -> Self {
-		let r = mem::transmute::<RawKeyword, Self>(src);
+	/// All preconditions of values specified in [`Self::new`] must pass.
+	pub(crate) const unsafe fn new_unchecked(src: [u8; STORE_SIZE as usize]) -> Self {
+		debug_assert!(src[STORE_SIZE as usize - 1] != 0);
+		let r: Self = mem::transmute(src);
 		r.assert_iter_state();
 		r
 	}
@@ -111,6 +142,24 @@ impl Keyword {
 			// safety: RawKeyword has strictly looser invariants than Keyword
 			mem::transmute(self.clone())
 		}
+	}
+
+	/// Indicates whether this keyword only tokenises as an lvalue or rvalue.
+	pub fn position(&self) -> TokenPosition {
+		let lvalue = self.flags & (flags::LVALUE_ONLY) != 0;
+		let rvalue = self.flags & (flags::RVALUE_ONLY) != 0;
+
+		match (lvalue, rvalue) {
+			(true, false) => TokenPosition::Left,
+			(false, true) => TokenPosition::Right,
+			(false, false) => TokenPosition::Any,
+			(true, true) => unreachable!("both LVALUE_ONLY and RVALUE_ONLY set!"),
+		}
+	}
+
+	#[inline]
+	pub fn min_abbrev(&self) -> Option<NonZeroU8> {
+		NonZeroU8::new(self.flags & flags::MIN_ABBREV_LEN_MASK)
 	}
 
 	/// Moves the keyword into an iterator over its bytes.
@@ -133,21 +182,7 @@ impl Keyword {
 	}
 }
 
-
-impl PartialOrd for Keyword {
-	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for Keyword {
-	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		self.as_bytes().cmp(other.as_bytes())
-	}
-}
-
-
-impl IntoIterator for Keyword {
+impl IntoIterator for RawKeyword {
 	type IntoIter = IntoIter;
 	type Item = u8;
 
@@ -156,7 +191,7 @@ impl IntoIterator for Keyword {
 	}
 }
 
-impl<'a> IntoIterator for &'a Keyword {
+impl<'a> IntoIterator for &'a RawKeyword {
 	type IntoIter = IntoIter;
 	type Item = u8;
 
@@ -167,15 +202,15 @@ impl<'a> IntoIterator for &'a Keyword {
 
 
 #[derive(Debug, Clone)]
-pub(crate) struct IntoIter(Keyword);
+pub(crate) struct IntoIter(RawKeyword);
 
 impl IntoIter {
 	pub(crate) const fn empty() -> Self {
 		let mut empty_keyword = unsafe {
 			// SAFETY: this mirrors an empty iteration
-			Keyword::new_unchecked([
+			RawKeyword::new_unchecked([
 				33, 0, 0,  0, 0, 0,  0, 0, 0, // chars
-				0, // padding
+				0, // flags
 				0, // iteration state (kept blank as a hack for assertions in new_unchecked)
 				1, // length (matches iteration state, must be non-zero)
 			])
@@ -200,83 +235,5 @@ impl Iterator for IntoIter {
 		}
 
 		next_byte.copied()
-	}
-}
-
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct KeywordFromStrError<'a>(pub &'a str);
-
-impl<'a> TryFrom<&'a str> for Keyword {
-	type Error = KeywordFromStrError<'a>;
-
-	fn try_from(value: &'a str) -> Result<Self, Self::Error> {
-		let error = move || KeywordFromStrError(value);
-
-		let slice = value.as_bytes();
-		let slice_len = match u8::try_from(slice.len()) {
-			Ok(0) | Err(_) => return Err(error()),
-			Ok(e) => e,
-		};
-
-		let mut arr = RawKeyword::default();
-		arr[..slice.len()].copy_from_slice(slice);
-		arr[STORE_SIZE as usize - 1] = slice_len;
-		Keyword::try_new(arr).map_err(|_| error())
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	fn new(s: &str) -> Keyword {
-		Keyword::try_from(s).unwrap()
-	}
-
-	#[test]
-	fn as_ascii_str() {
-		let k = new("ASCIIstr");
-		assert_eq!(AsciiStr::from_ascii(b"ASCIIstr"), Ok(k.as_ascii_str()));
-	}
-
-	#[test]
-	fn as_array() {
-		let k = new("ABCDEFGHI");
-		assert_eq!([65,66,67,68,69,70,71,72,73,0,0,9], k.as_array());
-	}
-	
-	#[test]
-	fn try_new() {
-		assert!(Keyword::try_new([40,40,40,0,0,0,0,0,0,0,0,3]).is_ok());
-		assert!(Keyword::try_new(RawKeyword::default()).is_err());
-	}
-
-	#[test]
-	#[should_panic]
-	fn fail_too_long() {
-		let _ = new("ASCIIstr??");
-	}
-
-	#[test]
-	#[should_panic]
-	fn fail_not_ascii() {
-		let _ = new("1234\u{4e94}");
-	}
-
-	#[test]
-	#[should_panic]
-	#[allow(non_snake_case)]
-	fn fail_C0() {
-		let _ = new("keywo\rd");
-	}
-
-	#[test]
-	fn into_iter() {
-		for case in ["ABCDEF", "1", "123456789"] {
-			let output: arrayvec::ArrayVec<u8, {MAX_LEN as usize}>
-				= new(case).into_iter().collect();
-			assert_eq!(case.as_bytes(), &*output);
-		}
 	}
 }

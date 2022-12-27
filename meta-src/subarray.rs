@@ -1,5 +1,9 @@
 use std::{ops::Index, num::NonZeroUsize};
 
+pub mod traits {
+	pub use super::SubArrayFlat;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubArray<'a, T> {
 	slice: &'a [T],
@@ -54,16 +58,27 @@ impl<'a, T: Default + Copy> FullIter<'a, T> {
 }
 
 impl<'a, T: Default + Copy> Iterator for FullIter<'a, T> {
-	type Item = T;
+	type Item = &'a T;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if let Some(old) = self.skip_count {
 			// don't return anything
 			self.skip_count = NonZeroUsize::new(old.get() - 1);
-			Some(T::default())
+			None
 		} else {
-			self.slice.next().copied()
+			self.slice.next()
 		}
+	}
+}
+
+
+pub trait SubArrayFlat<'a, T> {
+	fn get_flat(&'a self, index: usize) -> Option<&'a T>;
+}
+
+impl<'a, T> SubArrayFlat<'a, T> for SubArray<'a, Option<T>> {
+	fn get_flat(&'a self, index: usize) -> Option<&'a T> {
+		self.get(index).and_then(Option::as_ref)
 	}
 }
 
@@ -104,10 +119,10 @@ mod test {
 	#[test]
 	fn full_iter() {
 		let sut = SubArray::new(&[1, 2, 3], 2);
-		let result: Vec<_> = sut.full_iter().collect();
+		let result: Vec<_> = sut.full_iter().copied().collect();
 		assert_eq!(&[0, 0, 1, 2, 3], &*result);
 
 		let sut = SubArray::new(&[5], 0);
-		assert_eq!(Some(5), sut.full_iter().next());
+		assert_eq!(Some(5), sut.full_iter().copied().next());
 	}
 }

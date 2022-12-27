@@ -15,6 +15,14 @@ mod pack;
 
 use pack::Error as PackError;
 
+// include meta-src files that we want
+#[path = "../meta-src/keyword.rs"] mod keyword;
+#[path = "../meta-src/token_iter.rs"] mod token_iter;
+#[path = "../meta-src/subarray.rs"] mod subarray;
+#[cfg(test)]
+#[path = "../meta-src/cooked_keyword.rs"] mod cooked_keyword;
+
+
 #[derive(Debug, Options)]
 enum Command {
 

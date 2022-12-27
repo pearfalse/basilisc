@@ -5,22 +5,20 @@ use std::{
 	path::Path, num::NonZeroU8,
 };
 
+
 #[path = "meta-src"]
 mod meta_src {
-	mod keyword;
-	pub(super) use keyword::Keyword;
+	pub mod keyword;
+	pub mod token_iter;
 
-	mod token_iter;
-	pub(super) use token_iter::{TokenIter, Codegen};
+	mod cooked_keyword;
+	pub(crate) use cooked_keyword::*;
 }
+use meta_src::{*, token_iter::TokenIter};
 
 #[allow(dead_code)]
 fn dead_code_build_rs_exemptions() {
 }
-
-use meta_src::*;
-
-type RawTokenMap = &'static [(u8, &'static str)];
 
 fn main() -> io::Result<()> {
 	// OUT_DIR
@@ -30,7 +28,7 @@ fn main() -> io::Result<()> {
 	// early-runtime data gen
 	let (token_goto, token_gosub) = {
 		fn _find_direct(key: &'static str) -> u8 {
-			TOKEN_MAP_DIRECT.iter().find(|&&(_, val)| val == key).unwrap().0
+			TOKEN_MAP_DIRECT.iter().find(|kw| kw.keyword().as_str() == key).unwrap().byte().get()
 		}
 		(_find_direct("GOTO"), _find_direct("GOSUB"))
 	};
@@ -41,15 +39,19 @@ fn main() -> io::Result<()> {
 	write!(gen_token_data, r#"// auto-generated
 use core::num::NonZeroU8;
 
-use crate::support::{{RawKeyword, Keyword, TokenIter, SubArray}};
+use crate::{{
+	keyword::RawKeyword,
+	subarray::SubArray,
+	token_iter::TokenIter,
+}};
 
-type TokenDecodeMap = SubArray<'static, RawKeyword>;
+type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 
 "#)?; // TODO: there's no reason to have these be RawKeywords, there's no fallible conversion here
 
 	// write arrays
 	macro_rules! write_array {
-		($var:ident) => {_write_array(&mut gen_token_data, $var, stringify!($var))};
+		($var:ident) => {_write_array(&mut gen_token_data, &*$var, stringify!($var))};
 	}
 	write_array!(TOKEN_MAP_DIRECT)?;
 	write_array!(TOKEN_MAP_C6)?;
@@ -68,8 +70,9 @@ type TokenDecodeMap = SubArray<'static, RawKeyword>;
 	gen_token_data.sync_all()?;
 	return Ok(());
 
-	fn _write_array(file: &mut fs::File, arr: RawTokenMap, name: &'static str) -> io::Result<()> {
-		fn reduce_front<T: Copy>(mut slice: &[Option<T>]) -> (&[Option<T>], usize) {
+	fn _write_array(file: &mut fs::File, arr: &'static [Keyword], name: &'static str)
+	-> io::Result<()> {
+		fn reduce_front<T>(mut slice: &[Option<T>]) -> (&[Option<T>], usize) {
 			let mut from = 0usize;
 			while let Some((None, x)) = slice.split_first() {
 				slice = x;
@@ -77,60 +80,63 @@ type TokenDecodeMap = SubArray<'static, RawKeyword>;
 			}
 			(slice, from)
 		}
-		fn reduce_back<T: Copy>(mut slice: &[Option<T>]) -> &[Option<T>] {
+		fn reduce_back<T>(mut slice: &[Option<T>]) -> &[Option<T>] {
 			while let Some((None, x)) = slice.split_last() {
 				slice = x;
 			}
 			slice
 		}
 
-		let mut flat_arr: [Option<&'static str>; 256] = [None; 256];
-		for &(byte, val) in arr {
-			flat_arr[byte as usize] = Some(val);
+		// for efficient storage, this needs to be sorted by token byte
+		let mut flat_arr: [Option<&'static Keyword>; 256] = [None; 256];
+		for kw in arr {
+			flat_arr[kw.byte().get() as usize] = Some(kw);
 		}
 
 		let (flat_arr, from) = reduce_front(&mut flat_arr[..]);
 		let flat_arr = reduce_back(flat_arr);
 
-		writeln!(file, "pub(crate) static {}: TokenDecodeMap = TokenDecodeMap::new(&[", name)?;
+		writeln!(file, "pub(crate) static {}: TokenDecodeMap = TokenDecodeMap::new(unsafe {{&[",
+			name)?;
+		writeln!(file, "\t// SAFETY: valid arrays were generated at build time")?;
 		for (i, maybe_val) in flat_arr.iter().copied().enumerate() {
-			// assert string (if present) is ascii
-			debug_assert!(maybe_val.map(str::is_ascii).unwrap_or(true));
-			let (raw_arr, comment_text) = match maybe_val {
-				Some(s) => (Keyword::try_from(s).unwrap().as_array(), s),
-				None => (Default::default(), "<none>"),
-			};
-			writeln!(file, "\t{:?}, // {:02X} = {}", raw_arr, i + from, comment_text)?;
+			let i = i + from;
+			if let Some(kw) = maybe_val {
+				writeln!(file, "\tSome(RawKeyword::new_unchecked({:?})), // {:02X} = {}",
+					kw.as_array(), i, kw.keyword().as_str())?;
+			} else {
+				writeln!(file, "\tNone, // {:02X} = <none>", i)?;
+			}
 		}
-		writeln!(file, "], 0x{:02x});\n", from)
+		writeln!(file, "]}}, 0x{:02x});\n", from)
 	}
 }
 
 fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
-	let mut list: Vec<(Keyword, TokenIter)> = Vec::with_capacity(TOKEN_MAP_DIRECT.len()
+	let mut list: Vec<(&'static Keyword, TokenIter)>
+	= Vec::with_capacity(TOKEN_MAP_DIRECT.len()
 		+ TOKEN_MAP_C6.len() + TOKEN_MAP_C7.len() + TOKEN_MAP_C8.len());
 
-	let baked_prefix = [
-		(TOKEN_MAP_DIRECT, None),
-		(TOKEN_MAP_C6, NonZeroU8::new(0xc6)),
-		(TOKEN_MAP_C7, NonZeroU8::new(0xc7)),
-		(TOKEN_MAP_C8, NonZeroU8::new(0xc8)),
+	let baked_prefix: [(&'static [Keyword], _); 4] = [
+		(&*TOKEN_MAP_DIRECT, None),
+		(&*TOKEN_MAP_C6, NonZeroU8::new(0xc6)),
+		(&*TOKEN_MAP_C7, NonZeroU8::new(0xc7)),
+		(&*TOKEN_MAP_C8, NonZeroU8::new(0xc8)),
 	];
 
-	for (array, prefix) in baked_prefix {
-		for (value, string) in array.iter().copied() {
-			let value = NonZeroU8::new(value).unwrap();
-			list.push((Keyword::try_from(string).unwrap(), if let Some(prefix) = prefix {
-				TokenIter::new_indirect(prefix, value)
+	for (map, prefix) in baked_prefix {
+		for kw in map {
+			list.push((kw, if let Some(prefix) = prefix {
+				TokenIter::new_indirect(prefix, kw.byte())
 			} else {
-				TokenIter::new_direct(value)
+				TokenIter::new_direct(kw.byte())
 			}));
 		}
 	}
 
-	list.sort_by_key(|&(ref kw, _)| kw.as_array());
+	list.sort_unstable();
 
-	writeln!(file, "pub(crate) type TokenLookupEntry = (Keyword, TokenIter);")?;
+	writeln!(file, "pub(crate) type TokenLookupEntry = (RawKeyword, TokenIter);")?;
 	writeln!(file, "// SAFETY: values are generated from the same parsed type at build time")?;
 	writeln!(file,
 		"pub(crate) static LOOKUP_MAP: [TokenLookupEntry; {}] = unsafe {{[",
@@ -138,9 +144,9 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 	)?;
 
 	for (keyword, value) in list {
-		writeln!(file, "\t( // {}", keyword.as_ascii_str().as_str())?;
-		writeln!(file, "\t\tKeyword::new_unchecked({:?}),", keyword.as_array())?;
-		writeln!(file, "\t\t{},", Codegen::from(value, false))?;
+		writeln!(file, "\t( // {}", keyword.keyword().as_str())?;
+		writeln!(file, "\t\tRawKeyword::new_unchecked({:?}),", keyword.as_array())?;
+		writeln!(file, "\t\t{},", token_iter::Codegen::from(value, false))?;
 		writeln!(file, "\t),")?;
 	}
 	writeln!(file, "]}};")?;
@@ -148,7 +154,35 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 	Ok(())
 }
 
-static TOKEN_MAP_DIRECT: RawTokenMap = &[
+macro_rules! _token_once {
+	(($byte:expr, $word:literal)) => {
+		_token_once!(($byte, $word, abbr 0, pos Any))
+	};
+    (($byte:expr, $word:literal, abbr $abbr:literal)) => {
+    	_token_once!(($byte, $word, abbr $abbr, pos Any))
+    };
+    (($byte:expr, $word:literal, pos $pos:ident)) => {
+    	_token_once!(($byte, $word, abbr 0, pos $pos))
+    };
+    (($byte:expr, $word:literal, abbr $abbr:literal, pos $pos:ident)) => {
+        $crate::Keyword::try_new($byte, $word,
+        	::core::num::NonZeroU8::new($abbr),
+        	$crate::meta_src::keyword::TokenPosition::$pos)
+        .unwrap()
+    };
+}
+
+macro_rules! token_map {
+	($name:ident, $( $groups:tt ,)*) => {
+		::lazy_static::lazy_static! {
+			static ref $name: &'static [Keyword] = vec![$(
+				_token_once!($groups),
+			)*].leak();
+		}
+	}
+}
+
+token_map![TOKEN_MAP_DIRECT,
 	(0x7f, "OTHERWISE"),
 	(0x80, "AND"),
 	(0x81, "DIV"),
@@ -166,10 +200,10 @@ static TOKEN_MAP_DIRECT: RawTokenMap = &[
 	// 0x8d is a fix, we hardcode that special case
 	(0x8e, "OPENIN"),
 	(0x8f, "PTR"),
-	(0x90, "PAGE"),
-	(0x91, "TIME"),
-	(0x92, "LOMEM"),
-	(0x93, "HIMEM"),
+	(0x90, "PAGE", pos Right),
+	(0x91, "TIME", pos Right),
+	(0x92, "LOMEM", pos Right),
+	(0x93, "HIMEM", pos Right),
 	(0x94, "ABS"),
 	(0x95, "ACS"),
 	(0x96, "ADVAL"),
@@ -228,10 +262,10 @@ static TOKEN_MAP_DIRECT: RawTokenMap = &[
 	(0xcd, "ENDIF"),
 	(0xce, "ENDWHILE"),
 	(0xcf, "PTR"),
-	(0xd0, "PAGE"),
-	(0xd1, "TIME"),
-	(0xd2, "LOMEM"),
-	(0xd3, "HIMEM"),
+	(0xd0, "PAGE", pos Left),
+	(0xd1, "TIME", pos Left),
+	(0xd2, "LOMEM", pos Left),
+	(0xd3, "HIMEM", pos Left),
 	(0xd4, "SOUND"),
 	(0xd5, "BPUT"),
 	(0xd6, "CALL"),
@@ -278,12 +312,12 @@ static TOKEN_MAP_DIRECT: RawTokenMap = &[
 	(0xff, "OSCLI"),
 ];
 
-static TOKEN_MAP_C6: RawTokenMap = &[
+token_map![TOKEN_MAP_C6,
 	(0x8e, "SUM"),
 	(0x8f, "BEAT"),
 ];
 
-static TOKEN_MAP_C7: RawTokenMap = &[
+token_map![TOKEN_MAP_C7,
 	(0x8e, "APPEND"),
 	(0x8f, "AUTO"),
 	(0x90, "CRUNCH"),
@@ -304,7 +338,7 @@ static TOKEN_MAP_C7: RawTokenMap = &[
 	(0x9f, "INSTALL"),
 ];
 
-static TOKEN_MAP_C8: RawTokenMap = &[
+token_map![TOKEN_MAP_C8,
 	(0x8e, "CASE"),
 	(0x8f, "CIRCLE"),
 	(0x90, "FILL"),

@@ -7,7 +7,10 @@ use std::{num::NonZeroU16, io};
 use arrayvec::ArrayVec;
 use nonzero_ext::nonzero;
 
-use crate::support::{NextByte, TokenIter, ArrayVecExt as _};
+use crate::{
+	support::{NextByte, ArrayVecExt as _},
+	token_iter::TokenIter,
+};
 
 mod gaps;
 use gaps::*;
@@ -352,7 +355,7 @@ mod test_parser {
 	}
 }
 
-type TokenScanBuffer = arrayvec::ArrayVec<u8, { crate::support::MAX_KEYWORD_LEN as usize }>;
+type TokenScanBuffer = arrayvec::ArrayVec<u8, { crate::keyword::MAX_LEN as usize }>;
 
 #[derive(Debug)]
 struct TokenScan {
