@@ -9,7 +9,7 @@ mod test_lookup {
 	// These tests are for lookups on generated data
 
 	use crate::{
-		keyword::{RawKeyword, TokenPosition},
+		keyword::RawKeyword,
 		subarray::{SubArray, traits::*},
 	};
 	use super::{TOKEN_MAP_DIRECT, TOKEN_MAP_C6, TOKEN_MAP_C7, TOKEN_MAP_C8};
