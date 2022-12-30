@@ -141,7 +141,7 @@ impl TokenScanner {
 
 		match *self.pinch {
 			// perfect match, greedy match
-			[(ref kw, ref ti)] if eq_char_buf!(kw) => {
+			[(ref kw, ref ti)] if kw.is_greedy() && eq_char_buf!(kw) => {
 				self.commit_to(ti);
 			},
 
@@ -170,19 +170,20 @@ impl TokenScanner {
 
 	fn commit_best_match(&mut self) {
 		if let Some((kw, best)) = self.best_match.take() {
-			// take this subset of characters, use it
-			self.token_buf.push(best.clone());
+			if kw.is_greedy() {
+				// take this subset of characters, use it
+				self.token_buf.push(best.clone());
 
-			// preserve unconsumed chars to re-add them
-			self.char_buf.remove_first(kw.len().get() as usize);
-			self.pinch = PINCH_ALL;
+				// preserve unconsumed chars to re-add them
+				self.char_buf.remove_first(kw.len().get() as usize);
+				self.pinch = PINCH_ALL;
+				return;
+			}
 		}
-		else {
-			// move all chars as-is
-			self.char_out_buf.extend(mem::replace(
-				&mut self.char_buf, Default::default()
-				).into_iter());
-		}
+		// move all chars as-is
+		self.char_out_buf.extend(mem::replace(
+			&mut self.char_buf, Default::default()
+			).into_iter());
 	}
 
 	fn is_keyword_char(ch: u8) -> bool {
@@ -309,7 +310,7 @@ mod tests {
 
 	#[test]
 	fn smush_could_last_longer() {
-		assert_output(b"ENDING", b"\xe0ING");
+		assert_output(b"GETS", b"\xa5S");
 	}
 
 	#[test]
@@ -357,11 +358,15 @@ mod tests {
 	}
 
 	#[test]
-	#[ignore = "this will come later"]
-	fn everyones_favourite_awful_edge_case() {
-		// the text ENDPI switches from looking like `ENDPROC` to being `END` + `PI` in a single
-		// char input :(
-		assert_output(b"ENDPI", b"\xe0\xaf");
+	fn nongreedy() {
+		assert_output(b"PRINTY", b"\xf1Y");
+		assert_output(b"ENDY", b"ENDY");
+	}
+
+	#[test]
+	#[allow(non_snake_case)]
+	fn getDOLLAR() {
+		assert_output(b"GET$", b"\xbe");
 	}
 
 	#[track_caller]
