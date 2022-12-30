@@ -7,14 +7,6 @@ use crate::keyword;
 #[derive(Debug)]
 pub(crate) struct KeywordCtorError(&'static str);
 
-#[allow(non_snake_case)]
-pub(crate) mod Match {
-	#[allow(non_upper_case_globals)]
-	pub const Nongreedy: bool = false;
-	#[allow(non_upper_case_globals)]
-	pub const Greedy: bool = true;
-}
-
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Keyword {

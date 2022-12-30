@@ -175,7 +175,7 @@ macro_rules! _token_once {
 		$word,
 		None,
 		Any,
-		$crate::meta_src::cooked_keyword::Match::Nongreedy
+		false
 	)};
 	(($byte:expr, $word:literal, abbr $abbr:literal, nongreedy))
 	=> {_token_impl!(
@@ -183,7 +183,7 @@ macro_rules! _token_once {
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
 		Any,
-		$crate::meta_src::cooked_keyword::Match::Nongreedy
+		false
 	)};
 
 	(($byte:expr, $word:literal))
@@ -192,7 +192,7 @@ macro_rules! _token_once {
 		$word,
 		None,
 		Any,
-		$crate::meta_src::cooked_keyword::Match::Greedy
+		true
 	)};
 	(($byte:expr, $word:literal, abbr $abbr:literal))
 	=> {_token_impl!(
@@ -200,7 +200,7 @@ macro_rules! _token_once {
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
 		Any,
-		$crate::meta_src::cooked_keyword::Match::Greedy
+		true
 	)};
 	(($byte:expr, $word:literal, abbr $abbr:literal, pos $pos:ident, nongreedy))
 	=> {_token_impl!(
@@ -208,7 +208,7 @@ macro_rules! _token_once {
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
 		$pos,
-		$crate::meta_src::cooked_keyword::Match::Greedy
+		true
 	)};
 }
 

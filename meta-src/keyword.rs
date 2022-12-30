@@ -277,8 +277,7 @@ mod tests {
 
 	#[test]
 	fn min_abbrev() {
-		let kw = uncook(0x80, "LONG", NonZeroU8::new(2),
-			TokenPosition::Any, Match::Nongreedy);
+		let kw = uncook(0x80, "LONG", NonZeroU8::new(2), TokenPosition::Any, false);
 
 		assert_eq!(Some(AsciiStr::from_ascii(b"LO").unwrap()), kw.min_abbrev());
 	}
