@@ -11,10 +11,9 @@ mod meta_src {
 	pub mod keyword;
 	pub mod token_iter;
 
-	mod cooked_keyword;
-	pub(crate) use cooked_keyword::*;
+	pub(super) mod cooked_keyword;
 }
-use meta_src::{*, token_iter::TokenIter};
+use meta_src::{keyword, cooked_keyword::Keyword, token_iter::{self, TokenIter}};
 
 #[allow(dead_code)]
 fn dead_code_build_rs_exemptions() {
@@ -154,22 +153,79 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 	Ok(())
 }
 
+macro_rules! _token_greedy {
+	(nongreedy) => { $crate::cooked_keyword::Match::Nongreedy };
+	() => { $crate::cooked_keyword::Match::Greedy };
+}
+
+macro_rules! _token_impl {
+	($byte:literal, $word:literal, $abbr:expr, $pos:ident, $greedy:expr) => {
+		$crate::meta_src::cooked_keyword::Keyword::try_new($byte, $word,
+			$abbr,
+			$crate::meta_src::keyword::TokenPosition::$pos,
+			$greedy)
+		.unwrap()
+	}
+}
+
 macro_rules! _token_once {
-	(($byte:expr, $word:literal)) => {
-		_token_once!(($byte, $word, abbr 0, pos Any))
-	};
-    (($byte:expr, $word:literal, abbr $abbr:literal)) => {
-    	_token_once!(($byte, $word, abbr $abbr, pos Any))
-    };
-    (($byte:expr, $word:literal, pos $pos:ident)) => {
-    	_token_once!(($byte, $word, abbr 0, pos $pos))
-    };
-    (($byte:expr, $word:literal, abbr $abbr:literal, pos $pos:ident)) => {
-        $crate::Keyword::try_new($byte, $word,
-        	::core::num::NonZeroU8::new($abbr),
-        	$crate::meta_src::keyword::TokenPosition::$pos)
-        .unwrap()
-    };
+	(($byte:expr, $word:literal, nongreedy))
+	=> {_token_impl!(
+		$byte,
+		$word,
+		None,
+		Any,
+		$crate::meta_src::cooked_keyword::Match::Nongreedy
+	)};
+	(($byte:expr, $word:literal, pos $pos:ident, nongreedy))
+	=> {_token_impl!(
+		$byte,
+		$word,
+		None,
+		$pos,
+		$crate::meta_src::cooked_keyword::Match::Nongreedy
+	)};
+
+	(($byte:expr, $word:literal))
+	=> {_token_impl!(
+		$byte,
+		$word,
+		None,
+		Any,
+		$crate::meta_src::cooked_keyword::Match::Greedy
+	)};
+	(($byte:expr, $word:literal, abbr $abbr:literal))
+	=> {_token_impl!(
+		$byte,
+		$word,
+		::nonzero_ext::nonzero!($abbr),
+		Any,
+		$crate::meta_src::cooked_keyword::Match::Greedy
+	)};
+	(($byte:expr, $word:literal, pos $pos:ident))
+	=> {_token_impl!(
+		$byte,
+		$word,
+		None,
+		$pos,
+		$crate::meta_src::cooked_keyword::Match::Greedy
+	)};
+	(($byte:expr, $word:literal, abbr $abbr:literal, pos $pos:ident, $greedy:ident))
+	=> {_token_impl!(
+		$byte,
+		$word,
+		::nonzero_ext::nonzero!($abbr),
+		$pos,
+		$crate::meta_src::cooked_keyword::Match::Greedy
+	)};
+	(($byte:expr, $word:literal, nongreedy))
+	=> {_token_impl!(
+		$byte,
+		$word,
+		None,
+		Any,
+		$crate::meta_src::cooked_keyword::Match::Nongreedy
+	)};
 }
 
 macro_rules! token_map {

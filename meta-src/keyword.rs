@@ -69,9 +69,10 @@ impl Ord for RawKeyword {
 pub(crate) mod flags {
 	pub const LVALUE_ONLY         : u8 = 1<<7;
 	pub const RVALUE_ONLY         : u8 = 1<<6;
+	pub const GREEDY              : u8 = 1<<5;
 	pub const MIN_ABBREV_LEN_MASK : u8 = 0b1111;
 
-	pub const RESERVED: u8 = !(LVALUE_ONLY | RVALUE_ONLY | MIN_ABBREV_LEN_MASK);
+	pub const RESERVED: u8 = !(LVALUE_ONLY | RVALUE_ONLY | GREEDY | MIN_ABBREV_LEN_MASK);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -160,6 +161,11 @@ impl RawKeyword {
 	#[inline]
 	pub fn min_abbrev(&self) -> Option<NonZeroU8> {
 		NonZeroU8::new(self.flags & flags::MIN_ABBREV_LEN_MASK)
+	}
+
+	#[inline]
+	pub fn is_greedy(&self) -> bool {
+		self.flags & flags::GREEDY != 0
 	}
 
 	/// Moves the keyword into an iterator over its bytes.
