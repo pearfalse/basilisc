@@ -285,7 +285,6 @@ mod tests {
 
 	#[test]
 	fn min_abbrev_real() {
-		use ascii::AsAsciiStr;
 		assert_eq!(Some(b"P".as_slice()),
 			crate::token_data::TOKEN_MAP_DIRECT[0xf1]
 			.unwrap().min_abbrev_bytes());

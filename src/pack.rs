@@ -1,21 +1,17 @@
 //! Handles packing a textual BBC BASIC representation into a tokenised BASIC file (type `&FFB`).
 
-use crate::token_data::{TokenLookupEntry, self};
-
 use std::{num::NonZeroU16, io};
 
 use arrayvec::ArrayVec;
 use nonzero_ext::nonzero;
 
-use crate::{
-	support::{NextByte, ArrayVecExt as _},
-	token_iter::TokenIter,
-};
+use crate::support::NextByte;
 
 mod gaps;
 use gaps::*;
 
 mod token_scan;
+use token_scan::TokenScanner;
 
 const MAX_LINE_LEN: usize = 251;
 const LINE_NUMBER_CAP: u16 = 0xff00;
@@ -98,7 +94,7 @@ type Result<T> = ::std::result::Result<T, Error>;
 pub struct Parser<I> {
 	buf: ArrayVec<u8, MAX_LINE_LEN>,
 	lines: Vec<UnnumberedLine>,
-	token_scan: TokenScan,
+	token_scan: TokenScanner,
 	inner: I,
 	is_eof: bool,
 }
@@ -111,7 +107,7 @@ impl<I> Parser<I> where
 		Self {
 			buf: ArrayVec::new(),
 			lines: Vec::new(),
-			token_scan: TokenScan::new(),
+			token_scan: TokenScanner::new(),
 			inner: src,
 			is_eof: false,
 		}
@@ -190,7 +186,10 @@ impl<I> Parser<I> where
 
 		self.token_scan.flush();
 
-		let flushed_bytes = (&mut self.token_scan).collect::<TokenScanBuffer>();
+		let mut flushed_bytes = token_scan::CharBuffer::new();
+		while let Some(b) = self.token_scan.try_pull() {
+			flushed_bytes.push(b);
+		}
 		self.try_add_bytes(&*flushed_bytes)?;
 
 		let final_line_number = match state {
@@ -234,7 +233,7 @@ impl<I> Parser<I> where
 	}
 
 	fn update_body(&mut self, byte: u8) -> Result<()> {
-		self.token_scan.narrow(byte);
+		self.token_scan.push(byte);
 
 		// narrowing can release a token too
 		while let Some(b) = self.token_scan.try_pull() {
@@ -344,239 +343,18 @@ mod test_parser {
 		}
 		assert_eq!(Ok(false), parser.next_line());
 
-		const EXPECT: [&'static [u8]; 6] = [b"EN", b"\xe0", b"\xe0PR", b"\xe1", b"\xe1K",
-			b"\xe0\xaf"];
+		const EXPECT: [&'static [u8]; 6] = [b"EN", b"\xe0", b"ENDPR", b"\xe1", b"ENDPROCK",
+			b"ENDPI"];
 		let mut ln = (10u16..).step_by(10);
 		let mut expect = EXPECT.iter().copied();
 		for line in parser.lines {
-			assert_eq!(ln.next(), line.line_number);
+			let expected_line = ln.next().unwrap();
+			println!("line {}", expected_line);
+			assert_eq!(Some(expected_line), line.line_number);
 			assert_eq!(expect.next().unwrap(), &*line.contents);
 		}
 	}
 }
-
-type TokenScanBuffer = arrayvec::ArrayVec<u8, { crate::keyword::MAX_LEN as usize }>;
-
-#[derive(Debug)]
-struct TokenScan {
-	/// Bytes of untokenised user input.
-	bytes: TokenScanBuffer,
-	/// A decreasing slice of the assumed-sorted token map array, containing all tokens for which
-	/// the bytes in `bytes` are a valid subset.
-	pinch: &'static [TokenLookupEntry],
-	/// The best-matched token so far, which may get replaced with a longer matching one.
-	best_match: Option<&'static TokenLookupEntry>,
-	/// A matched token to read from before doing anything else.
-	token: TokenIter,
-}
-
-static PINCH_DEFAULT: &'static [TokenLookupEntry] = token_data::LOOKUP_MAP.as_slice();
-
-impl TokenScan {
-	fn new() -> Self {
-		Self {
-			bytes: TokenScanBuffer::default(),
-			pinch: PINCH_DEFAULT,
-			best_match: None,
-			token: TokenIter::default(), // empty iterator
-		}
-	}
-
-	fn narrow(&mut self, byte: u8) {
-		self.bytes.push(byte);
-		self._pinch(self.bytes.len() - 1);
-
-		match self.pinch {
-			[perfect] if perfect.0.as_bytes() == &*self.bytes => {
-				// perfect match
-				self.token = perfect.1.clone();
-				self.best_match = None;
-				self.bytes.clear();
-				self.pinch = PINCH_DEFAULT;
-				self._pinch(0); // re-pinch
-			},
-
-			[prefix, ..] if prefix.0.as_bytes() == &*self.bytes => {
-				// at least one match, but there might be more
-				self.best_match = Some(prefix);
-			},
-
-			[] if self.best_match.is_some() => {
-				// actively apply best match
-				let best_match = self.best_match.take().unwrap();
-				self.token = best_match.1.clone();
-				self.bytes.remove_first(best_match.0.len().get() as usize);
-
-				// remake pinch sequence for remaining characters
-				self.pinch = PINCH_DEFAULT;
-				self._pinch(0);
-
-				// after pinching remaining bytes, re-match best effort
-				if let [be, ..] = self.pinch {
-					if self.bytes.starts_with(be.0.as_bytes()) {
-						self.best_match = Some(be);
-					}
-				}
-			}
-			_ => {},
-		};
-	}
-
-	#[must_use]
-	fn try_pull(&mut self) -> Option<u8> {
-		// flushing a token?
-		if let Some(next) = self.token.next() {
-			return Some(next.get());
-		}
-
-		// if pinch is empty and buffer isn't, we're still flushing
-		if self.pinch.is_empty() {
-			if let next @ Some(_) = self.bytes.pop_front() {
-				return next;
-			}
-			// if here, we've finished flushing known-not-token bytes
-			self.pinch = PINCH_DEFAULT;
-		}
-		None
-	}
-
-	fn flush(&mut self) {
-		if let Some(&(ref keyword, ref iter)) = self.best_match.take() {
-			// the token is almost definitely shorter than the word it replaces
-			// how much shifting will we have to do?
-			self.token = iter.clone();
-
-			// remove effective padding
-			self.bytes.remove_first(keyword.len().get() as usize);
-			self._pinch(0);
-		}
-		else {
-			// give up on partial keyword matches
-			self.pinch = &[];
-		}
-	}
-
-	fn _pinch(&mut self, start: usize) {
-		for (pinch_idx, byte) in self.bytes.iter().enumerate().skip(start) {
-			// front byte first
-			while let Some((left, remain)) = self.pinch.split_first() {
-				if left.0.as_bytes().get(pinch_idx as usize).map(|b| b < byte) != Some(false) {
-					// not yet narrowed down to matching substrings
-					self.pinch = remain;
-				} else {
-					break;
-				}
-			}
-
-			// then back byte
-			while let Some((right, remain)) = self.pinch.split_last() {
-				if right.0.as_bytes().get(pinch_idx as usize).map(|b| b > byte) == Some(true) {
-					// too flabby on the right
-					self.pinch = remain;
-				} else {
-					break;
-				}
-			}
-
-			if self.pinch.is_empty() { break; }
-		}
-	}
-}
-
-impl Iterator for TokenScan {
-	type Item = u8;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		self.try_pull()
-	}
-}
-
-
-#[cfg(test)]
-mod test_token_scan {
-    use crate::pack::TokenScanBuffer;
-	use super::TokenScan;
-
-	#[test]
-	fn find_in_range() {
-		for (word, token_byte) in [
-			(b"CHAIN".as_slice(), 215),
-			(b"WHEN", 201),
-			(b"INT", 168),
-		] {
-			let mut scanner = TokenScan::new();
-			for &b in word {
-				assert!(scanner.try_pull().is_none());
-				scanner.narrow(b);
-			}
-
-			assert_eq!(Some(token_byte), scanner.try_pull());
-			assert_eq!(None, scanner.try_pull());
-		}
-	}
-
-	#[test]
-	fn unambigious_but_incomplete() {
-		// CHAI is an unambigious prefix, but it's not actually a keyword
-		let mut scanner = TokenScan::new();
-		for &b in b"CHAI" {
-			assert!(scanner.try_pull().is_none());
-			scanner.narrow(b);
-		}
-		scanner.flush();
-
-		let kw = (&mut scanner).collect::<TokenScanBuffer>();
-		assert_eq!(&b"CHAI"[..], &*kw);
-	}
-
-	#[test]
-	fn final_char_failure() {
-		let mut scanner = TokenScan::new();
-		for &b in b"CHAIR" {
-			assert!(scanner.try_pull().is_none());
-			scanner.narrow(b);
-		}
-		let result = scanner.collect::<TokenScanBuffer>();
-		assert_eq!(b"CHAIR".as_slice(), &*result);
-	}
-
-	#[test]
-	fn early_failure() {
-		let mut scanner = TokenScan::new();
-		// none of these letters are token prefixes
-		for &b in b"XYZZY" {
-			scanner.narrow(b);
-			assert_eq!(Some(b), scanner.try_pull());
-		}
-	}
-
-	#[test]
-	fn match_subset() {
-		let mut scanner = TokenScan::new();
-		for &b in b"END" {
-			assert!(scanner.try_pull().is_none());
-			scanner.narrow(b)
-		}
-		scanner.flush();
-
-		let result = scanner.collect::<TokenScanBuffer>();
-		assert_eq!(&[0xe0u8][..], &*result);
-	}
-
-	#[test]
-	#[ignore = "this is just proof of a need of a rewrite"]
-	fn must_be_word_start() {
-		let mut scanner = TokenScan::new();
-		for &b in b"T.TOLEMY" {
-			scanner.narrow(b);
-		}
-		scanner.flush();
-
-		let result = scanner.collect::<TokenScanBuffer>();
-		assert_eq!(b"T.\xb8LEMY", &*result);
-	}
-}
-
 
 /// A generative iterator for inferred line numbers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
