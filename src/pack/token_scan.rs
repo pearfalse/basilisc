@@ -286,25 +286,24 @@ mod tests {
 
 	#[test]
 	fn smush_cannot_match_longer() {
-		assert_eq!(b"\x97II", &*_inout(b"ASCII"));
+		assert_output(b"ASCII", b"\x97II");
 	}
 
 	#[test]
 	fn smush_could_last_longer() {
-		assert_eq!(b"\xe0ING", &*_inout(b"ENDING"));
+		assert_output(b"ENDING", b"\xe0ING");
 	}
 
 	#[test]
 	fn inkey() {
-		assert_eq!(b"\xa6#", &*_inout(b"INKEY#"));
-		assert_eq!(b"\xbf", &*_inout(b"INKEY$"));
+		assert_output(b"INKEY#", b"\xa6#");
+		assert_output(b"INKEY$", b"\xbf");
 	}
 
 	#[test]
 	fn not_in_middle() {
 		const SRC: &'static [u8] = b"PTOLEMY"; // `TO` should not tokenise
-		let out_buf = _inout(SRC);
-		assert_eq!(SRC, &*out_buf);
+		assert_output(SRC, SRC);
 	}
 
 	#[test]
@@ -314,8 +313,7 @@ mod tests {
 
 		for limit in (1..(SRC.len())).step_by(CHUNK) {
 			let src = &SRC[..limit];
-
-			assert_eq!(src, &*_inout(src));
+			assert_output(src, src);
 		}
 	}
 
@@ -324,9 +322,18 @@ mod tests {
 	fn everyones_favourite_awful_edge_case() {
 		// the text ENDPI switches from looking like `ENDPROC` to being `END` + `PI` in a single
 		// char input :(
-		assert_eq!(b"\xe0\xaf", &*_inout(b"ENDPI"));
+		assert_output(b"ENDPI", b"\xe0\xaf");
 	}
 
+	#[track_caller]
+	fn assert_output(input: &[u8], output: &[u8]) {
+		let got = _inout(input);
+
+		if &*got != output {
+			panic!("token scan failed\n\nexpected `{}`\nbut got: `{}`\n",
+				output.escape_ascii(), got.escape_ascii());
+		}
+	}
 
 	fn _inout(src: &[u8]) -> Vec<u8> {
 		if let Ok(s) = ascii::AsAsciiStr::as_ascii_str(src) {
