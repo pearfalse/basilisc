@@ -243,3 +243,36 @@ impl Iterator for IntoIter {
 		next_byte.copied()
 	}
 }
+
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::cooked_keyword::*;
+
+	fn uncook(
+		byte: u8, word: &'static str, min_abbrev: Option<NonZeroU8>,
+		pos: TokenPosition, greedy: bool,
+	) -> RawKeyword {
+		let kw = Keyword::try_new(byte, word, min_abbrev, pos, greedy).unwrap();
+		unsafe {
+			RawKeyword::new_unchecked(kw.as_array())
+		}
+	}
+
+	#[test]
+	fn min_abbrev() {
+		let kw = uncook(0x80, "LONG", NonZeroU8::new(2),
+			TokenPosition::Any, Match::Nongreedy);
+
+		assert_eq!(Some(AsciiStr::from_ascii(b"LO").unwrap()), kw.min_abbrev());
+	}
+
+	#[test]
+	fn min_abbrev_real() {
+		use ascii::AsAsciiStr;
+		assert_eq!(Some(b"P".as_slice()),
+			crate::token_data::TOKEN_MAP_DIRECT[0xf1]
+			.unwrap().min_abbrev_bytes());
+	}
+}

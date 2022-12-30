@@ -82,10 +82,10 @@ impl Keyword {
 				Any => 0,
 				Left => flags::LVALUE_ONLY,
 				Right => flags::RVALUE_ONLY,
-			}) | match self.greedy {
+			}) | (match self.greedy {
 				true => flags::GREEDY,
 				false => 0,
-			}
+			})
 		};
 
 		store
