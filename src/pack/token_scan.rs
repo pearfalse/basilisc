@@ -89,7 +89,7 @@ impl TokenScanner {
 			(false, false) => {
 				// this char will never match; flush all consideration chars
 				self.commit_best_match();
-				self.char_buf.push(ch);
+				self.char_out_buf.push(ch);
 			},
 		}
 	}
@@ -328,6 +328,21 @@ mod tests {
 	fn min_abbrev() {
 		assert_output(b"MO.2", b"\xeb2");
 		assert_output(b"P.\"yes\"", b"\xf1\"yes\"");
+	}
+
+	#[test]
+	fn reset_after_tokenising() {
+		let mut input = [b'P', b'R', b'I', b'N', b'T', 0, b'M', b'O', b'D', b'E'];
+		const INP_POS: usize = 5;
+
+		let mut output = [0xf1, 0, 0xeb];
+		const OUTP_POS: usize = 1;
+
+		for sep_char in [b':', b'/', 0x20, 7] {
+			input[INP_POS] = sep_char;
+			output[OUTP_POS] = sep_char;
+			assert_output(input.as_slice(), output.as_slice());
+		}
 	}
 
 	#[test]
