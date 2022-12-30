@@ -2,7 +2,7 @@
 
 use std::{fmt, num::NonZeroU8, mem};
 
-use ascii::AsciiStr;
+use ascii::{AsciiStr, AsAsciiStr};
 
 pub const MAX_LEN: u8 = 9;
 pub const STORE_SIZE: u8 = 12;
@@ -13,6 +13,7 @@ pub const STORE_SIZE: u8 = 12;
 /// backing store, which `Keyword` may own or borrow.
 #[derive(Clone, Copy)]
 #[repr(C)]
+#[repr(align(4))]
 pub(crate) struct RawKeyword {
 	/// Actual meaningful characters
 	chars: [u8; MAX_LEN as usize],
@@ -40,7 +41,7 @@ impl Eq for RawKeyword {}
 
 impl PartialOrd for RawKeyword {
 	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-	    Some(<Self as Ord>::cmp(self, other))
+		Some(<Self as Ord>::cmp(self, other))
 	}
 }
 
@@ -159,8 +160,22 @@ impl RawKeyword {
 	}
 
 	#[inline]
-	pub fn min_abbrev(&self) -> Option<NonZeroU8> {
+	pub fn min_abbrev_len(&self) -> Option<NonZeroU8> {
 		NonZeroU8::new(self.flags & flags::MIN_ABBREV_LEN_MASK)
+	}
+
+	#[inline]
+	pub fn min_abbrev(&self) -> Option<&AsciiStr> {
+		self.min_abbrev_len().map(|c| unsafe {
+			// SAFETY: upheld by external constraints to `RawKeyword::new_unchecked`
+			let bytes = ::core::slice::from_raw_parts(self.chars.as_ptr(), c.get() as usize);
+			bytes.as_ascii_str_unchecked()
+		})
+	}
+
+	#[inline]
+	pub fn min_abbrev_bytes(&self) -> Option<&[u8]> {
+		self.min_abbrev().map(AsciiStr::as_bytes)
 	}
 
 	#[inline]

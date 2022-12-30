@@ -2,7 +2,9 @@ use std::num::NonZeroU8;
 use std::{fmt, mem};
 
 use arrayvec::ArrayVec;
+use ascii::AsciiStr;
 
+use crate::keyword::RawKeyword;
 use crate::token_data::TokenLookupEntry;
 use crate::{
 	token_iter::TokenIter,
@@ -56,6 +58,19 @@ impl TokenScanner {
 	}
 
 	pub fn push(&mut self, ch: u8) {
+		if ch == b'.' {
+			// early match on short keyword
+			if let Some(char_buf_len) = NonZeroU8::new(self.char_buf.len() as u8) {
+				// (an empty char_buf wouldn't be useful)
+				debug_assert!(self.pinch.len() < PINCH_ALL.len());
+				let abbr_match = self.pinch.iter()
+					.find(|&&(ref kw, _)| kw.min_abbrev_len() == Some(char_buf_len));
+				if let Some((_kw, ti)) = abbr_match {
+					self.commit_to(ti);
+					return;
+				}
+			}
+		}
 		match (Self::is_keyword_char(ch), self.pinch.is_empty()) {
 			(true, true) => {
 				// already failed, possible variable name, do not restart searching
@@ -121,16 +136,13 @@ impl TokenScanner {
 
 	fn try_extract(&mut self) {
 		macro_rules! eq_char_buf {
-			($kw:expr) => { $kw.as_bytes() == &*self.char_buf };
+			($kw:expr) => { &*self.char_buf == $kw.as_bytes() };
 		}
 
 		match *self.pinch {
 			// perfect match, greedy match
 			[(ref kw, ref ti)] if eq_char_buf!(kw) => {
-				self.best_match = None; // forget that, we have a definite winner
-				self.token_buf.push(ti.clone());
-				self.char_buf.clear(); // all bytes accounted for
-				self.pinch = PINCH_ALL; // ready for future stuff
+				self.commit_to(ti);
 			},
 
 			// a good match, but there might be a longer one
@@ -147,6 +159,13 @@ impl TokenScanner {
 			[_, ..] => {
 			},
 		};
+	}
+
+	fn commit_to(&mut self, ti: &TokenIter) {
+		self.best_match = None; // forget that, we have a definite winner
+		self.token_buf.push(ti.clone());
+		self.char_buf.clear(); // all bytes accounted for
+		self.pinch = PINCH_ALL; // ready for future stuff
 	}
 
 	fn commit_best_match(&mut self) {
@@ -170,8 +189,7 @@ impl TokenScanner {
 		// it's variable validity that matters here; getting one of these with an empty pinch
 		// is *not* a case where we can reset the tokeniser
 		// @ is not included; @% is an edge case, but not one we need to worry about
-		matches!(ch, b'A'..=b'Z' | b'a'..=b'z')
-			|| b"_$(.".contains(&ch)
+		matches!(ch, b'A'..=b'Z') || b"_$(".contains(&ch)
 	}
 }
 
@@ -304,6 +322,12 @@ mod tests {
 	fn not_in_middle() {
 		const SRC: &'static [u8] = b"PTOLEMY"; // `TO` should not tokenise
 		assert_output(SRC, SRC);
+	}
+
+	#[test]
+	fn min_abbrev() {
+		assert_output(b"MO.2", b"\xeb2");
+		assert_output(b"P.\"yes\"", b"\xf1\"yes\"");
 	}
 
 	#[test]
