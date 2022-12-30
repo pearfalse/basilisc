@@ -2,19 +2,17 @@ use std::num::NonZeroU8;
 use std::{fmt, mem};
 
 use arrayvec::ArrayVec;
-use ascii::AsciiStr;
 
-use crate::keyword::RawKeyword;
-use crate::token_data::TokenLookupEntry;
 use crate::{
+	token_data::TokenLookupEntry,
 	token_iter::TokenIter,
 	support::{ArrayVecExt, HexArray},
 };
 
 // chars that didn't match anything
-type CharBuffer = ArrayVec<u8, { crate::keyword::MAX_LEN as usize }>;
+pub(super) type CharBuffer = ArrayVec<u8, { crate::keyword::MAX_LEN as usize }>;
 
-struct TokenScanner {
+pub(super) struct TokenScanner {
 	char_buf: CharBuffer,
 	token_buf: Option<TokenIter>,
 	char_out_buf: CharBuffer,
@@ -92,8 +90,11 @@ impl TokenScanner {
 	}
 
 	pub fn flush(&mut self) {
-		if let Some((kw, ti)) = self.best_match {
+		if let Some((kw, ti)) = self.best_match.filter(|(kw, _)|
+				kw.len().get() as usize == self.char_buf.len()
+			) {
 			// crush best_match chars into token equiv
+			// allow nongreedy keywords to do this if char_buf matches
 			let ti = ti.clone();
 			self.char_out_buf.extend(ti.map(NonZeroU8::get));
 			self.char_out_buf.extend(self.char_buf.iter().copied().skip(kw.len().get() as usize));
@@ -364,6 +365,12 @@ mod tests {
 	#[allow(non_snake_case)]
 	fn getDOLLAR() {
 		assert_output(b"GET$", b"\xbe");
+	}
+
+	#[test]
+	fn found_regressions() {
+		assert_output(b"ENDPR", b"ENDPR");
+		assert_output(b"PRINT\"it works\"", b"\xf1\"it works\"");
 	}
 
 	#[track_caller]
