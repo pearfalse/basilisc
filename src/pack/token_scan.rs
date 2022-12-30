@@ -11,15 +11,12 @@ use crate::{
 	support::{ArrayVecExt, HexArray},
 };
 
-// there is a known pathological case where 2 tokens appear for one byte, but that should be it
-type TokenMatchBuffer = ArrayVec<TokenIter, 2>;
-
 // chars that didn't match anything
 type CharBuffer = ArrayVec<u8, { crate::keyword::MAX_LEN as usize }>;
 
 struct TokenScanner {
 	char_buf: CharBuffer,
-	token_buf: TokenMatchBuffer,
+	token_buf: Option<TokenIter>,
 	char_out_buf: CharBuffer,
 	best_match: Option<&'static TokenLookupEntry>,
 	cur_token: Option<TokenIter>,
@@ -32,7 +29,7 @@ impl TokenScanner {
 	pub fn new() -> Self {
 		Self {
 			char_buf: CharBuffer::new(),
-			token_buf: TokenMatchBuffer::new(),
+			token_buf: None,
 			char_out_buf: CharBuffer::new(),
 			best_match: None,
 			cur_token: None,
@@ -47,7 +44,7 @@ impl TokenScanner {
 			}
 
 			// it's exhausted, try pulling from token_buf
-			if let new @ Some(_) = self.token_buf.pop_front() {
+			if let new @ Some(_) = self.token_buf.take() {
 				self.cur_token = new;
 			} else {
 				break 'ti; // can't do anything else with tokens
@@ -163,7 +160,7 @@ impl TokenScanner {
 
 	fn commit_to(&mut self, ti: &TokenIter) {
 		self.best_match = None; // forget that, we have a definite winner
-		self.token_buf.push(ti.clone());
+		self.token_buf = Some(ti.clone());
 		self.char_buf.clear(); // all bytes accounted for
 		self.pinch = PINCH_ALL; // ready for future stuff
 	}
@@ -172,7 +169,7 @@ impl TokenScanner {
 		if let Some((kw, best)) = self.best_match.take() {
 			if kw.is_greedy() {
 				// take this subset of characters, use it
-				self.token_buf.push(best.clone());
+				self.token_buf = Some(best.clone());
 
 				// preserve unconsumed chars to re-add them
 				self.char_buf.remove_first(kw.len().get() as usize);
@@ -241,7 +238,7 @@ impl fmt::Debug for TokenScanner {
 
 		f.debug_struct("TokenScanner")
 			.field("char_buf", &HexArray(&*self.char_buf))
-			.field("token_buf", &&*self.token_buf)
+			.field("token_buf", &self.token_buf)
 			.field("char_out_buf", &&*self.char_out_buf)
 			.field("best_match", &self.best_match)
 			.field("cur_token", &self.cur_token)
@@ -272,11 +269,11 @@ mod tests_try_pull {
 	#[test]
 	fn in_queue() {
 		let mut scanner = TokenScanner::new();
-		scanner.token_buf.push(TokenIter::new_direct(nonzero!(1u8)));
+		scanner.token_buf = Some(TokenIter::new_direct(nonzero!(1u8)));
 		assert_eq!(Some(1), scanner.try_pull());
 		assert_eq!(None, scanner.try_pull());
 
-		scanner.token_buf.push(TokenIter::new_indirect(nonzero!(0xc6u8), nonzero!(0xffu8)));
+		scanner.token_buf = Some(TokenIter::new_indirect(nonzero!(0xc6u8), nonzero!(0xffu8)));
 		assert_eq!(Some(0xc6), scanner.try_pull());
 		assert_eq!(Some(0xff), scanner.try_pull());
 		assert_eq!(None, scanner.try_pull());
