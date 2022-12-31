@@ -2,7 +2,8 @@
 
 use std::{fmt, num::NonZeroU8, mem};
 
-use ascii::{AsciiStr, AsAsciiStr};
+use arrayvec::ArrayVec;
+use ascii::{AsciiStr, AsAsciiStr, AsciiChar};
 
 pub const MAX_LEN: u8 = 9;
 pub const STORE_SIZE: u8 = 12;
@@ -92,7 +93,20 @@ fn _assert_struct_size() {
 
 impl fmt::Debug for RawKeyword {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "RawKeyword(\"{}\")", self.as_ascii_str()) // TODO: add flags
+		write!(f, "RawKeyword(\"{}\"", self.as_ascii_str())?;
+		if let Some(abbr) = self.min_abbrev_len().map(NonZeroU8::get) {
+			write!(f, ", abbr {}", abbr)?;
+		}
+
+		let mut flag_chars = ArrayVec::<AsciiChar, 2>::new();
+		match self.position() {
+			TokenPosition::Left  => flag_chars.push(AsciiChar::L),
+			TokenPosition::Right => flag_chars.push(AsciiChar::R),
+			_ => {},
+		};
+		flag_chars.push(if self.is_greedy() {AsciiChar::Exclamation} else {AsciiChar::Question});
+
+		write!(f, " [{}])", <&AsciiStr>::from(&*flag_chars))
 	}
 }
 
