@@ -17,6 +17,7 @@ use meta_src::{keyword, cooked_keyword::Keyword, token_iter::{self, TokenIter}};
 
 #[allow(dead_code)]
 fn dead_code_build_rs_exemptions() {
+	let _ = TokenIter::peek_first;
 }
 
 fn main() -> io::Result<()> {
