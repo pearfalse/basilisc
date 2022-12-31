@@ -61,7 +61,19 @@ impl CharExt for char {
 	}
 
 	fn as_risc_os_latin1(self) -> Option<u8> {
-		LATIN1_MAP.iter().position(|&l| l == self).map(|idx| idx as u8)
+		let this = &(self as u32);
+		// ASCII printable, C0 direct
+		if (0x00..=0x7e).contains(this) {
+			return Some(self as u8);
+		}
+		// C0 soft forms
+		if (0x2400..=0x241f).contains(this) {
+			return Some((self as u32 - 0x2400) as u8);
+		}
+		if *this == 0x2421 {
+			return Some(0x7f);
+		}
+		LATIN1_MAP[0x80..].iter().position(|&l| l == self).map(|idx| idx as u8 + 0x80)
 	}
 }
 
@@ -71,6 +83,7 @@ mod tests {
 
 	#[test]
 	fn to_unicode() {
+		assert_eq!('C', char::from_risc_os_latin1(b'C'));
 		assert_eq!('€', char::from_risc_os_latin1(0x80));
 		assert_eq!('\u{2400}', char::from_risc_os_latin1(0x00));
 	}
@@ -79,6 +92,8 @@ mod tests {
 	fn to_latin1() {
 		assert_eq!(Some(0x00), '\u{2400}'.as_risc_os_latin1());
 		assert_eq!(Some(0x8d), '™'.as_risc_os_latin1());
+		assert_eq!(Some(0x7f), '\u{2421}'.as_risc_os_latin1());
+		assert_eq!(Some(0xff), 'ÿ'.as_risc_os_latin1());
 		assert_eq!(None, 'ア'.as_risc_os_latin1());
 	}
 }
