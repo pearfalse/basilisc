@@ -32,6 +32,10 @@ impl TokenIter {
 			_ => 0,
 		}
 	}
+
+	pub(crate) fn peek_first(&self) -> u8 {
+		self.a.map(NonZeroU8::get).unwrap_or(0)
+	}
 }
 
 impl fmt::Debug for TokenIter {

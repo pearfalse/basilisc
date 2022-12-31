@@ -7,6 +7,7 @@ use crate::{
 	token_data::TokenLookupEntry,
 	token_iter::TokenIter,
 	support::{ArrayVecExt, HexArray},
+	keyword::TokenPosition,
 };
 
 // chars that didn't match anything
@@ -19,6 +20,7 @@ pub(super) struct TokenScanner {
 	best_match: Option<&'static TokenLookupEntry>,
 	cur_token: Option<TokenIter>,
 	pinch: &'static [TokenLookupEntry],
+	is_lhs: bool,
 }
 
 static PINCH_ALL: &'static [TokenLookupEntry] = crate::token_data::LOOKUP_MAP.as_slice();
@@ -32,6 +34,7 @@ impl TokenScanner {
 			best_match: None,
 			cur_token: None,
 			pinch: PINCH_ALL,
+			is_lhs: true,
 		}
 	}
 
@@ -53,6 +56,10 @@ impl TokenScanner {
 	}
 
 	pub fn push(&mut self, ch: u8) {
+		macro_rules! set_lhs {
+			(char) => { self.is_lhs = ch == b':'; };
+		}
+
 		if ch == b'.' {
 			// early match on short keyword
 			if let Some(char_buf_len) = NonZeroU8::new(self.char_buf.len() as u8) {
@@ -75,6 +82,7 @@ impl TokenScanner {
 				// reset pinch, but this char will never match
 				self.pinch = PINCH_ALL;
 				self.char_out_buf.push(ch);
+				set_lhs!(char);
 			},
 			(true, false) => {
 				// it's narrowing time babey
@@ -85,14 +93,15 @@ impl TokenScanner {
 				// this char will never match; flush all consideration chars
 				self.commit_best_match();
 				self.char_out_buf.push(ch);
+				set_lhs!(char);
 			},
 		}
 	}
 
 	pub fn flush(&mut self) {
 		if let Some((kw, ti)) = self.best_match.filter(|(kw, _)|
-				kw.len().get() as usize == self.char_buf.len()
-			) {
+			kw.len().get() as usize == self.char_buf.len()
+		) {
 			// crush best_match chars into token equiv
 			// allow nongreedy keywords to do this if char_buf matches
 			let ti = ti.clone();
@@ -108,11 +117,20 @@ impl TokenScanner {
 	fn narrow(&mut self, ch: u8) {
 		let pinch_idx = self.char_buf.len();
 		self.char_buf.push(ch);
+		dbg!(self.is_lhs);
 
 		// front byte first
 		while let Some((left, remain)) = self.pinch.split_first() {
-			if left.0.as_ascii_str().as_bytes()
-			.get(pinch_idx as usize).map(|&b| b < ch) != Some(false) {
+			let should_narrow_normal = left.0.as_ascii_str().as_bytes()
+				.get(pinch_idx as usize).map(|&b| b < ch) != Some(false);
+
+			// skip over RHS token if there is one
+			let should_narrow_lhs = self.is_lhs && left.0.position() == TokenPosition::Right;
+			// if we did that, there must be a RHS one immediately after
+			debug_assert!(!should_narrow_lhs
+				|| remain.get(0).map(|(kw, _)| kw.position()) == Some(TokenPosition::Left));
+
+			if should_narrow_normal || should_narrow_lhs {
 				// not yet narrowed down to matching substrings
 				self.pinch = remain;
 			} else {
@@ -164,6 +182,11 @@ impl TokenScanner {
 		self.token_buf = Some(ti.clone());
 		self.char_buf.clear(); // all bytes accounted for
 		self.pinch = PINCH_ALL; // ready for future stuff
+
+		if ti.clone().peek_first() != 0xe9 {
+			// all keywords *except* LET move us to RHS
+			self.is_lhs = false;
+		}
 	}
 
 	fn commit_best_match(&mut self) {
@@ -175,6 +198,11 @@ impl TokenScanner {
 				// preserve unconsumed chars to re-add them
 				self.char_buf.remove_first(kw.len().get() as usize);
 				self.pinch = PINCH_ALL;
+
+				if best.clone().peek_first() != 0xe9 {
+					// all keywords *except* LET move us to RHS
+					self.is_lhs = false;
+				}
 				return;
 			}
 		}
@@ -365,6 +393,12 @@ mod tests {
 	#[allow(non_snake_case)]
 	fn getDOLLAR() {
 		assert_output(b"GET$", b"\xbe");
+	}
+
+	#[test]
+	fn left_right_tokens() {
+		assert_output(b"HIMEM=HIMEM", b"\xd3=\x93");
+		assert_output(b"TIME:TIME", b"\xd1:\xd1");
 	}
 
 	#[test]
