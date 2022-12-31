@@ -80,9 +80,9 @@ pub(crate) mod flags {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub(crate) enum TokenPosition {
-	Any,
-	Left,
-	Right,
+	Any = 0,
+	Left = 2,
+	Right = 1,
 }
 
 #[allow(dead_code)]

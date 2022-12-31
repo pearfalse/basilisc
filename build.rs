@@ -133,7 +133,7 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 		}
 	}
 
-	list.sort_unstable_by_key(|&(kw, _)| kw.keyword());
+	list.sort_unstable();
 
 	writeln!(file, "pub(crate) type TokenLookupEntry = (RawKeyword, TokenIter);")?;
 	writeln!(file, "// SAFETY: values are generated from the same parsed type at build time")?;

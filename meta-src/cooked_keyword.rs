@@ -106,6 +106,26 @@ impl Keyword {
     }
 }
 
+impl PartialOrd for Keyword {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(<Keyword as Ord>::cmp(self, other))
+	}
+}
+
+impl Ord for Keyword {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		fn abbr(src: &Keyword) -> u8 {
+			src.min_abbrev.map(NonZeroU8::get).unwrap_or(0)
+		}
+
+		// compare keyword, greedy, pos, abbr (not byte, that's output data)
+		self.keyword().cmp(other.keyword())
+			.then_with(|| self.greedy.cmp(&other.greedy))
+			.then_with(|| self.position.cmp(&other.position))
+			.then_with(|| abbr(self).cmp(&abbr(other)))
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
