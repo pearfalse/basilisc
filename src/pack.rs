@@ -13,6 +13,9 @@ use gaps::*;
 mod token_scan;
 use token_scan::TokenScanner;
 
+mod byte_decode;
+use byte_decode::ByteDecoder;
+
 const MAX_LINE_LEN: usize = 251;
 const LINE_NUMBER_CAP: u16 = 0xff00;
 

@@ -17,6 +17,9 @@ sptr = ">= 0.3"
 lto = true
 codegen-units = 1
 
+[dev-dependencies]
+assert_hex = "0.2"
+
 [build-dependencies]
 static_assertions = "1.1"
 nonzero_ext = "0.3"

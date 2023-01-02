@@ -7,6 +7,10 @@ pub(crate) use per_line_bits::*;
 mod arrayvec_ext;
 pub(crate) use arrayvec_ext::ArrayVecExt;
 
+pub trait Readable: io::Read + io::Seek {}
+impl<T: io::Read + io::Seek> Readable for T {}
+pub type IoObject<'a> = &'a mut (dyn Readable + 'a);
+
 pub trait NextByte {
 	type Error;
 	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error>;
