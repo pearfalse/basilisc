@@ -326,6 +326,14 @@ mod test_parser {
 		], false);
 	}
 
+	#[test]
+	fn gap_before_line_numbers() {
+		static ALL: &'static [u8] = b"\x20\x20\x20 30END";
+		for i in 0..3 {
+			expect_success(&ALL[i..], &[(30, b"\xe0")], false);
+		}
+	}
+
 	fn expect_success(input: &[u8], output: &[(u16, &[u8])], set_numbers: bool) {
 		let mut cursor = io::Cursor::new(input);
 		let mut parser = Parser::new(&mut cursor);
