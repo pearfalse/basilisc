@@ -1,9 +1,10 @@
-use core::fmt;
 use std::{
 	io,
 	ops::ControlFlow,
-	mem::{MaybeUninit, ManuallyDrop},
+	mem::{MaybeUninit, ManuallyDrop}, num::NonZeroUsize,
 };
+
+use nonzero_ext::nonzero;
 
 use crate::{
 	latin1::CharExt,
@@ -42,17 +43,17 @@ impl PartialEq for Error {
 type Utf8Match = ControlFlow<[u8; 4]>;
 
 impl<'a> ByteDecoder<'a> {
-	pub const DEFAULT_CAPACITY: usize = 1<<16;
+	pub const DEFAULT_CAPACITY: NonZeroUsize = nonzero!(1usize<<16);
 
-	pub fn with_capacity(src: IoObject<'a>, capacity: usize) -> Self {
-		let capacity = if capacity == 0 { Self::DEFAULT_CAPACITY } else { capacity };
-
+	pub fn with_capacity(src: IoObject<'a>, capacity: NonZeroUsize) -> Self {
 		// - ManuallyDrop ensures that the original vec doesn't get dropped immediately
 		// - using vec![] ensures the buffer is initialised
 		// - immediately converting to boxed slice ensures the buffer stays address-stable
-		let mut buf = ManuallyDrop::new(vec![0u8; capacity].into_boxed_slice());
+		let mut buf = ManuallyDrop::new(vec![0u8; capacity.get()].into_boxed_slice());
 		Self {
-			buf: MaybeUninit::new(std::ptr::slice_from_raw_parts_mut(buf.as_mut_ptr(), capacity)),
+			buf: MaybeUninit::new(std::ptr::slice_from_raw_parts_mut(
+				buf.as_mut_ptr(), capacity.get()
+				)),
 			drain: std::ptr::slice_from_raw_parts(buf.as_ptr(), 0),
 			src,
 			last_read_pos: 0,
@@ -216,23 +217,26 @@ mod tests {
 		check_err(b"ABC\xe0", Error::InvalidUtf8 { start_pos: 3 }, None);
 	}
 
-	fn check(input: &[u8], output: &[u8], capacity: Option<usize>) {
+	fn check(input: &[u8], output: &[u8], buf_size: Option<usize>) {
 		use std::ops::Deref;
-		let out_buf = check_impl(input, output.len(), capacity);
+		let out_buf = check_impl(input, output.len(), buf_size);
 
 		assert_hex::assert_eq_hex!(Ok(output), out_buf.as_ref().map(Deref::deref));
 	}
 
-	fn check_err(input: &[u8], output: Error, capacity: Option<usize>) {
-		let out_err = check_impl(input, 0, capacity);
+	fn check_err(input: &[u8], output: Error, buf_size: Option<usize>) {
+		let out_err = check_impl(input, 0, buf_size);
 		assert_eq!(Err(output), out_err)
 	}
 
-	fn check_impl(input: &[u8], output_cap: usize, capacity: Option<usize>)
+	fn check_impl(input: &[u8], output_cap: usize, buf_size: Option<usize>)
 	-> Result<Vec<u8>, Error> {
 		let mut out_buf = Vec::with_capacity(output_cap);
 		let mut input = io::Cursor::new(input);
-		let mut sut = ByteDecoder::with_capacity(&mut input, capacity.unwrap_or(output_cap));
+		let mut sut = ByteDecoder::with_capacity(&mut input,
+			NonZeroUsize::new(buf_size.unwrap_or(output_cap))
+				.unwrap_or(ByteDecoder::DEFAULT_CAPACITY)
+			);
 
 		let result = loop {
 			match sut.read_next() {
