@@ -11,33 +11,13 @@ use crate::{
 	support::IoObject,
 };
 
+use super::Error;
+
 pub(super) struct ByteDecoder<'a> {
 	buf: MaybeUninit<*mut [u8]>, // heap storage
 	drain: *const [u8], // pull off chars
 	src: IoObject<'a>,
 	last_read_pos: u64,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub(super) enum Error {
-	#[error("invalid UTF-8 character at file position {start_pos}")]
-	InvalidUtf8 { start_pos: u64 },
-	#[error("character '{}' has no RISC OS Latin-1 equivalent", (.0).escape_unicode())]
-	NoLatin1Char(char),
-	#[error("I/O error: {0:?}")]
-	IoError(#[from] io::Error),
-}
-
-impl PartialEq for Error {
-	fn eq(&self, other: &Self) -> bool {
-		match (self, other) {
-			(Self::InvalidUtf8 { start_pos: a }, Self::InvalidUtf8 { start_pos: b })
-				if a == b => true,
-			(Self::NoLatin1Char(a), Self::NoLatin1Char(b))
-				if a == b => true,
-			_ => false,
-		}
-	}
 }
 
 type Utf8Match = ControlFlow<[u8; 4]>;

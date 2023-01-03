@@ -29,8 +29,10 @@ pub enum Error {
 	LineTooLong { length: u16 },
 	#[error("line number too large ({found}, must be less than 65280)")]
 	LineNumberOutOfRange { found: u32 },
-	#[error("invalid source character '{}'", (.0).escape_unicode())]
-	InvalidChar(char),
+	#[error("invalid UTF-8 character at file position {start_pos}")]
+	InvalidUtf8 { start_pos: u64 },
+	#[error("character '{}' has no RISC OS Latin-1 equivalent", (.0).escape_unicode())]
+	NoLatin1Char(char),
 	#[error("I/O error: {0}")]
 	IoError(#[from] std::io::Error),
 }
@@ -58,7 +60,11 @@ impl PartialEq for Error {
 				&LineNumberOutOfRange { found: b },
 			) => a == b,
 			(
-				&InvalidChar(a), &InvalidChar(b),
+				&InvalidUtf8 { start_pos: a },
+				&InvalidUtf8 { start_pos: b },
+			) => a == b,
+			(
+				&NoLatin1Char(a), &NoLatin1Char(b),
 			) => a == b,
 			_ => false,
 		}
