@@ -45,6 +45,8 @@ impl<'a> ByteDecoder<'a> {
 	pub const DEFAULT_CAPACITY: usize = 1<<16;
 
 	pub fn with_capacity(src: IoObject<'a>, capacity: usize) -> Self {
+		let capacity = if capacity == 0 { Self::DEFAULT_CAPACITY } else { capacity };
+
 		// - ManuallyDrop ensures that the original vec doesn't get dropped immediately
 		// - using vec![] ensures the buffer is initialised
 		// - immediately converting to boxed slice ensures the buffer stays address-stable
@@ -65,7 +67,7 @@ impl<'a> ByteDecoder<'a> {
 			};
 
 			match self.fill_buf()? {
-				ControlFlow::Break(()) if unsafe {&*self.drain}.len() == 0
+				ControlFlow::Break(()) if self.drain_len() == 0
 					=> return Ok(None), // file is done
 				ControlFlow::Break(()) => return Err(self.utf8_error()),
 				ControlFlow::Continue(()) => continue,
@@ -105,7 +107,6 @@ impl<'a> ByteDecoder<'a> {
 			return Ok(None);
 		};
 
-		// TODO increase last_read_pos
 		self.drain = &slice[(char8_len as usize)..] as *const [u8];
 		std::str::from_utf8(char8_slice)
 			.map_err(|_| Error::InvalidUtf8 { start_pos: self.last_read_pos })
@@ -122,11 +123,7 @@ impl<'a> ByteDecoder<'a> {
 			// SAFETY: always init'd, no one else keeps a mut ref around for this
 			self.buf.assume_init_read()
 		};
-
-		let rem_len = unsafe {
-			// SAFETY: impl to mimic feature `slice_ptr_len`
-			(*self.drain).len()
-		};
+		let rem_len = self.drain_len();
 
 		let empty_buf = unsafe {
 			if rem_len > 0 {
@@ -153,15 +150,23 @@ impl<'a> ByteDecoder<'a> {
 			};
 			let read_size = self.src.read(buf)?;
 			debug_assert!(read_size <= buf.len());
-			read_size + rem_len
+			read_size
 		};
 
-		self.drain = std::ptr::slice_from_raw_parts(entire_buf as *const u8, read_size);
+		self.drain = std::ptr::slice_from_raw_parts(entire_buf as *const u8, read_size + rem_len);
 
 		Ok(match read_size {
 			0 => ControlFlow::Break(()),
 			_ => ControlFlow::Continue(()),
 		})
+	}
+
+	#[inline(always)]
+	fn drain_len(&self) -> usize {
+		unsafe {
+			// SAFETY: self.drain is always a valid slice
+			(*self.drain).len()
+		}
 	}
 }
 
@@ -206,10 +211,28 @@ mod tests {
 		check("\u{2401}\u{2402}\u{2403}\u{2404}".as_bytes(), b"\x01\x02\x03\x04", Some(4));
 	}
 
+	#[test]
+	fn catch_trailing_failures() {
+		check_err(b"ABC\xe0", Error::InvalidUtf8 { start_pos: 3 }, None);
+	}
+
 	fn check(input: &[u8], output: &[u8], capacity: Option<usize>) {
-		let mut out_buf = Vec::with_capacity(output.len());
+		use std::ops::Deref;
+		let out_buf = check_impl(input, output.len(), capacity);
+
+		assert_hex::assert_eq_hex!(Ok(output), out_buf.as_ref().map(Deref::deref));
+	}
+
+	fn check_err(input: &[u8], output: Error, capacity: Option<usize>) {
+		let out_err = check_impl(input, 0, capacity);
+		assert_eq!(Err(output), out_err)
+	}
+
+	fn check_impl(input: &[u8], output_cap: usize, capacity: Option<usize>)
+	-> Result<Vec<u8>, Error> {
+		let mut out_buf = Vec::with_capacity(output_cap);
 		let mut input = io::Cursor::new(input);
-		let mut sut = ByteDecoder::with_capacity(&mut input, capacity.unwrap_or(output.len()));
+		let mut sut = ByteDecoder::with_capacity(&mut input, capacity.unwrap_or(output_cap));
 
 		let result = loop {
 			match sut.read_next() {
@@ -219,6 +242,6 @@ mod tests {
 			};
 		};
 
-		assert_hex::assert_eq_hex!(Ok(output), result.map(|()| &*out_buf));
+		result.map(|()| out_buf)
 	}
 }
