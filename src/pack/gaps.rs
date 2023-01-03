@@ -106,10 +106,6 @@ impl<'a> Iterator for FindGaps<'a> {
 				// SAFETY: there is no other active &'a mut borrow, and
 				// no overlap between self.lines and our new slice
 				debug_assert!(slice_start.add(count) <= new_start);
-
-				// TODO: miri is unhappy with this on the stable path, because the address
-				// technically comes from a *const UnnumberedLine that we cast, but with strict
-				// provenance not available on stable, we don't have a lot of choice here
 				&mut *std::ptr::slice_from_raw_parts_mut(slice_start, count)
 			}
 		})
