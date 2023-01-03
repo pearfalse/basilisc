@@ -13,6 +13,7 @@ use crate::{
 
 use super::Error;
 
+#[derive(Debug)]
 pub(super) struct ByteDecoder<'a> {
 	buf: MaybeUninit<*mut [u8]>, // heap storage
 	drain: *const [u8], // pull off chars
@@ -24,6 +25,11 @@ type Utf8Match = ControlFlow<[u8; 4]>;
 
 impl<'a> ByteDecoder<'a> {
 	pub const DEFAULT_CAPACITY: NonZeroUsize = nonzero!(1usize<<16);
+
+	#[inline]
+	pub fn new(src: IoObject<'a>) -> Self {
+		Self::with_capacity(src, Self::DEFAULT_CAPACITY)
+	}
 
 	pub fn with_capacity(src: IoObject<'a>, capacity: NonZeroUsize) -> Self {
 		// - ManuallyDrop ensures that the original vec doesn't get dropped immediately

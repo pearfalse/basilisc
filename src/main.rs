@@ -14,6 +14,7 @@ mod unpack;
 mod pack;
 
 use pack::Error as PackError;
+use support::IoObject;
 
 // include meta-src files that we want
 #[path = "../meta-src/keyword.rs"] mod keyword;
@@ -298,7 +299,7 @@ fn run_pack(args: PackArgs) -> Result<(), PackError> {
 		},
 	};
 
-	let input: &mut dyn io::Read = match &*args.input_file {
+	let input: IoObject<'_> = match &*args.input_file {
 		"-" => {
 			stdin = io::stdin();
 			stdin_lock = stdin.lock();

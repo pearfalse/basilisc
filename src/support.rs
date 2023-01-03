@@ -1,5 +1,4 @@
-use core::fmt;
-use std::{io, convert::Infallible, fmt::Write};
+use std::{fmt::{self, Debug}, io, convert::Infallible, fmt::Write};
 
 mod per_line_bits;
 pub(crate) use per_line_bits::*;
@@ -7,8 +6,8 @@ pub(crate) use per_line_bits::*;
 mod arrayvec_ext;
 pub(crate) use arrayvec_ext::ArrayVecExt;
 
-pub trait Readable: io::Read + io::Seek {}
-impl<T: io::Read + io::Seek> Readable for T {}
+pub trait Readable: io::Read + Debug {}
+impl<T: io::Read + Debug> Readable for T {}
 pub type IoObject<'a> = &'a mut (dyn Readable + 'a);
 
 pub trait NextByte {

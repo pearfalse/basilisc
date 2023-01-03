@@ -5,7 +5,7 @@ use std::{num::NonZeroU16, io};
 use arrayvec::ArrayVec;
 use nonzero_ext::nonzero;
 
-use crate::support::NextByte;
+use crate::support::{NextByte, IoObject};
 
 mod gaps;
 use gaps::*;
@@ -100,24 +100,22 @@ struct UnnumberedLine {
 type Result<T> = ::std::result::Result<T, Error>;
 
 #[derive(Debug)]
-pub struct Parser<I> {
+pub struct Parser<'a> {
 	buf: ArrayVec<u8, MAX_LINE_LEN>,
 	lines: Vec<UnnumberedLine>,
 	token_scan: TokenScanner,
-	inner: I,
+	inner: ByteDecoder<'a>,
 	is_eof: bool,
 }
 
-impl<I> Parser<I> where
-	I: NextByte,
-	Error: From<<I as NextByte>::Error>,
+impl<'a> Parser<'a>
 {
-	pub fn new(src: I) -> Self {
+	pub fn new(src: IoObject<'a>) -> Self {
 		Self {
 			buf: ArrayVec::new(),
 			lines: Vec::new(),
 			token_scan: TokenScanner::new(),
-			inner: src,
+			inner: ByteDecoder::new(src),
 			is_eof: false,
 		}
 	}
@@ -144,7 +142,6 @@ impl<I> Parser<I> where
 
 	fn raw_line(&mut self) -> Result<Option<Option<u16>>> {
 		// TODO: encode line number references properly
-		// TODO: read incoming characters as UTF-8, not bytes
 		#[derive(Debug)]
 		enum LineParser {
 			BeforeLineNumber,
@@ -155,7 +152,7 @@ impl<I> Parser<I> where
 		let mut state = LineParser::BeforeLineNumber;
 		self.buf.clear();
 		self.is_eof = true; // assume EOF, prove wrong when breaking on `\n`
-		while let Some(byte) = self.inner.next_byte()? {
+		while let Some(byte) = self.inner.read_next()? {
 			match byte {
 				b'\r' => continue, // blunt way of handling CRLF
 				b'\n' => { self.is_eof = false; break }, // end of line
@@ -288,26 +285,20 @@ mod test_parser {
 			write!(buf, "{}", attempt).unwrap();
 			assert_eq!(
 				Err(Error::LineNumberOutOfRange { found: reach }),
-				Parser::new(buf.as_str().as_bytes().iter()).next_line(),
+				Parser::new(&mut io::Cursor::new(buf.as_str().as_bytes())).next_line(),
 			);
 		}
 	}
 
 	#[test]
 	fn no_tokens() {
-		let mut parser = Parser::new(b"100 hooray".as_slice().iter());
-		assert_eq!(Ok(false), parser.next_line());
-		let line = match &*parser.lines {
-			&[_] => parser.lines.pop(),
-			_ => None,
-		}.expect("couldn't find single line");
-		assert_eq!(Some(100), line.line_number);
-		assert_eq!(&b" hooray"[..], &*line.contents);
+		expect_success(b"100 hooray", &[(100, b" hooray")]);
 	}
 
 	#[test]
 	fn eof_vs_eol() {
-		let mut parser = Parser::new(b"10\n!\n20".as_slice().iter());
+		let mut cursor = io::Cursor::new(b"10\n!\n20");
+		let mut parser = Parser::new(&mut cursor);
 		// this is line 10
 		assert_eq!(Ok(true), parser.next_line());
 		// this is a blank-ish line (line 15?)
@@ -330,7 +321,8 @@ mod test_parser {
 
 	#[test]
 	fn oh_boy_tokens() {
-		let mut parser = Parser::new(b"PRINT\"it works\"\nEND".as_slice().iter());
+		let mut cursor = io::Cursor::new(b"PRINT\"it works\"\nEND");
+		let mut parser = Parser::new(&mut cursor);
 		assert_eq!(Ok(true), parser.next_line());
 		assert_eq!(Ok(false), parser.next_line());
 
@@ -345,8 +337,8 @@ mod test_parser {
 
 	#[test]
 	fn problematic_prefixes() {
-		let mut parser = Parser::new(b"10EN\n20END\n30ENDPR\n40ENDPROC\n50ENDPROCK\n60ENDPI"
-			.as_slice().iter());
+		let mut cursor = io::Cursor::new(b"10EN\n20END\n30ENDPR\n40ENDPROC\n50ENDPROCK\n60ENDPI");
+		let mut parser = Parser::new(&mut cursor);
 		for _ in 0..5 {
 			assert_eq!(Ok(true), parser.next_line());
 		}
@@ -361,6 +353,25 @@ mod test_parser {
 			println!("line {}", expected_line);
 			assert_eq!(Some(expected_line), line.line_number);
 			assert_eq!(expect.next().unwrap(), &*line.contents);
+		}
+	}
+
+	fn expect_success(input: &[u8], output: &[(u16, &[u8])]) {
+		let mut cursor = io::Cursor::new(input);
+		let mut parser = Parser::new(&mut cursor);
+
+		let expected_nl_count = input.iter().filter(|b| **b == b'\n').count();
+
+		for _ in 0..expected_nl_count {
+			assert_eq!(Ok(true), parser.next_line());
+		}
+		assert_eq!(Ok(false), parser.next_line());
+
+		assert_eq!(parser.lines.len(), output.len());
+		for (line, (exp_line_number, exp_line_contents))
+		in parser.lines.into_iter().zip(output.iter().copied()) {
+			assert_eq!(Some(exp_line_number), line.line_number);
+			assert_eq!(exp_line_contents, &*line.contents);
 		}
 	}
 }
