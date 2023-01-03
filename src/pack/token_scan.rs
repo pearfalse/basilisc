@@ -117,7 +117,6 @@ impl TokenScanner {
 	fn narrow(&mut self, ch: u8) {
 		let pinch_idx = self.char_buf.len();
 		self.char_buf.push(ch);
-		dbg!(self.is_lhs);
 
 		// front byte first
 		while let Some((left, remain)) = self.pinch.split_first() {

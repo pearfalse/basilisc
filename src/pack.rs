@@ -292,71 +292,41 @@ mod test_parser {
 
 	#[test]
 	fn no_tokens() {
-		expect_success(b"100 hooray", &[(100, b" hooray")]);
+		for set_line_numbers in [true, false] {
+			expect_success(b"100 hooray", &[(100, b" hooray")], set_line_numbers);
+		}
 	}
 
 	#[test]
 	fn eof_vs_eol() {
-		let mut cursor = io::Cursor::new(b"10\n!\n20");
-		let mut parser = Parser::new(&mut cursor);
-		// this is line 10
-		assert_eq!(Ok(true), parser.next_line());
-		// this is a blank-ish line (line 15?)
-		assert_eq!(Ok(true), parser.next_line());
-		// this is line 20, with no explicit \n
-		assert_eq!(Ok(false), parser.next_line());
-		// this shouldn't try to read anything
-		assert_eq!(Ok(false), parser.next_line());
-
-		let [line1, line2, line3]: [UnnumberedLine; 3] = parser.lines.try_into().unwrap();
-
-		assert_eq!(Some(10), line1.line_number);
-		assert_eq!(None, line2.line_number);
-		assert_eq!(Some(20), line3.line_number);
-
-		assert!(line1.contents.is_empty());
-		assert_eq!(&[b'!'], &*line2.contents);
-		assert!(line3.contents.is_empty());
+		expect_success(b"10\n!\n20", &[
+			(10, b""),
+			(15, b"!"),
+			(20, b"")
+		], true);
 	}
 
 	#[test]
-	fn oh_boy_tokens() {
-		let mut cursor = io::Cursor::new(b"PRINT\"it works\"\nEND");
-		let mut parser = Parser::new(&mut cursor);
-		assert_eq!(Ok(true), parser.next_line());
-		assert_eq!(Ok(false), parser.next_line());
-
-		let [line1, line2]: [UnnumberedLine; 2] = parser.lines.try_into().unwrap();
-
-		assert!(line1.line_number.is_none());
-		assert!(line2.line_number.is_none());
-
-		assert_eq!(b"\xf1\"it works\"".as_slice(), &*line1.contents);
-		assert_eq!(&[0xe0][..], &*line2.contents);
+	fn tokens_no_line_numbers() {
+		expect_success(b"PRINT\"it works\"\nEND", &[
+			(10, b"\xf1\"it works\""),
+			(20, b"\xe0"),
+		], true);
 	}
 
 	#[test]
 	fn problematic_prefixes() {
-		let mut cursor = io::Cursor::new(b"10EN\n20END\n30ENDPR\n40ENDPROC\n50ENDPROCK\n60ENDPI");
-		let mut parser = Parser::new(&mut cursor);
-		for _ in 0..5 {
-			assert_eq!(Ok(true), parser.next_line());
-		}
-		assert_eq!(Ok(false), parser.next_line());
-
-		const EXPECT: [&'static [u8]; 6] = [b"EN", b"\xe0", b"ENDPR", b"\xe1", b"ENDPROCK",
-			b"ENDPI"];
-		let mut ln = (10u16..).step_by(10);
-		let mut expect = EXPECT.iter().copied();
-		for line in parser.lines {
-			let expected_line = ln.next().unwrap();
-			println!("line {}", expected_line);
-			assert_eq!(Some(expected_line), line.line_number);
-			assert_eq!(expect.next().unwrap(), &*line.contents);
-		}
+		expect_success(b"10EN\n20END\n30ENDPR\n40ENDPROC\n50ENDPROCK\n60ENDPI", &[
+			(10, b"EN"),
+			(20, b"\xe0"),
+			(30, b"ENDPR"),
+			(40, b"\xe1"),
+			(50, b"ENDPROCK"),
+			(60, b"ENDPI"),
+		], false);
 	}
 
-	fn expect_success(input: &[u8], output: &[(u16, &[u8])]) {
+	fn expect_success(input: &[u8], output: &[(u16, &[u8])], set_numbers: bool) {
 		let mut cursor = io::Cursor::new(input);
 		let mut parser = Parser::new(&mut cursor);
 
@@ -368,10 +338,21 @@ mod test_parser {
 		assert_eq!(Ok(false), parser.next_line());
 
 		assert_eq!(parser.lines.len(), output.len());
-		for (line, (exp_line_number, exp_line_contents))
-		in parser.lines.into_iter().zip(output.iter().copied()) {
-			assert_eq!(Some(exp_line_number), line.line_number);
-			assert_eq!(exp_line_contents, &*line.contents);
+
+		macro_rules! check {
+		    ($search:expr, $proc_line_number:expr) => {
+				for (line, (exp_line_number, exp_line_contents))
+				in $search.into_iter().zip(output.iter().copied()) {
+					assert_eq!($proc_line_number(exp_line_number), line.line_number);
+					assert_eq!(exp_line_contents, &*line.contents);
+				}
+		    };
+		}
+
+		if set_numbers {
+			check!(parser.into_lines().unwrap(), core::convert::identity);
+		} else {
+			check!(parser.lines, ::std::option::Option::Some);
 		}
 	}
 }
