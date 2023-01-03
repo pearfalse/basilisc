@@ -348,13 +348,13 @@ mod test_parser {
 		assert_eq!(parser.lines.len(), output.len());
 
 		macro_rules! check {
-		    ($search:expr, $proc_line_number:expr) => {
+			($search:expr, $proc_line_number:expr) => {
 				for (line, (exp_line_number, exp_line_contents))
 				in $search.into_iter().zip(output.iter().copied()) {
 					assert_eq!($proc_line_number(exp_line_number), line.line_number);
 					assert_eq!(exp_line_contents, &*line.contents);
 				}
-		    };
+			};
 		}
 
 		if set_numbers {
@@ -362,6 +362,26 @@ mod test_parser {
 		} else {
 			check!(parser.lines, ::std::option::Option::Some);
 		}
+	}
+}
+
+#[cfg(test)]
+mod test_line_write {
+	use super::*;
+
+	#[test]
+	fn basic() {
+		write(27, b"ABCDE", b"\r\0\x1b\x09ABCDE");
+		write(0xfeff, b"\x00\xff", b"\r\xfe\xff\x06\x00\xff");
+	}
+
+	fn write(line_number: u16, contents: &[u8], expect: &[u8]) {
+		let mut target = Vec::new();
+		Line {
+			line_number,
+			contents: Vec::from(contents).into_boxed_slice(),
+		}.write(&mut target).unwrap();
+		assert_eq!(expect, &*target);
 	}
 }
 
