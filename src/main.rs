@@ -313,9 +313,8 @@ fn run_pack(args: PackArgs) -> Result<(), PackError> {
 
 	let mut parser = pack::Parser::new(input);
 	let mut cnt = 0u16;
-	while dbg!(parser.next_line())? {
+	while parser.next_line()? {
 		cnt += 1;
-		eprintln!("line {}...", cnt);
 	}
 
 	parser.write(output)?;
