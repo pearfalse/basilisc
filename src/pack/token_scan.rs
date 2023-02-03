@@ -3,6 +3,7 @@ use std::{fmt, mem};
 
 use arrayvec::ArrayVec;
 
+use crate::keyword::RawKeyword;
 use crate::{
 	token_data::TokenLookupEntry,
 	token_iter::TokenIter,
@@ -158,6 +159,7 @@ impl TokenScanner {
 
 			// a good match, but there might be a longer one
 			[ref pair @ (ref kw, _), ..] if eq_char_buf!(kw) => {
+				println!("nongreedy/imperfect match: {:?}", kw);
 				self.best_match = Some(pair);
 			},
 
@@ -186,7 +188,15 @@ impl TokenScanner {
 
 	fn commit_best_match(&mut self) {
 		if let Some((kw, best)) = self.best_match.take() {
-			if kw.is_greedy() {
+			// should only commit if best match is either
+			// - greedy
+			// - nongreedy, but followed by something other than A-Z
+			let should_take = kw.is_greedy() || {
+				self.char_buf.get(kw.len().get() as usize)
+					.map(|c| !(b'A'..=b'Z').contains(c))
+					.unwrap_or(true)
+			};
+			if should_take {
 				// take this subset of characters, use it
 				self.token_buf = Some(best.clone());
 
@@ -211,6 +221,7 @@ impl TokenScanner {
 				return;
 			}
 		}
+
 		// move all chars as-is
 		self.char_out_buf.extend(mem::replace(
 			&mut self.char_buf, Default::default()
@@ -391,6 +402,13 @@ mod tests {
 	fn left_right_tokens() {
 		assert_output(b"HIMEM=HIMEM", b"\xd3=\x93");
 		assert_output(b"TIME:TIME", b"\xd1:\xd1");
+	}
+
+	#[test]
+	fn nongreedy_limits() {
+		assert_output(b"AND$", b"\x80$");
+		assert_output(b"EXT1", b"\xa2\x31");
+		assert_output(b"REPORT$", b"\xf6$");
 	}
 
 	#[test]
