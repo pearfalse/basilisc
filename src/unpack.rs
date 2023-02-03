@@ -2,7 +2,7 @@ use core::convert::Infallible;
 use std::io;
 
 use crate::{
-	support::*,
+	support::{ArrayVecExt, NextByte, PerLineBits},
 	keyword,
 	token_data,
 	line_numbers,

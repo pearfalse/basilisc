@@ -21,8 +21,6 @@ pub(super) struct ByteDecoder<'a> {
 	last_read_pos: u64,
 }
 
-type Utf8Match = ControlFlow<[u8; 4]>;
-
 impl<'a> ByteDecoder<'a> {
 	pub const DEFAULT_CAPACITY: NonZeroUsize = nonzero!(1usize<<16);
 
