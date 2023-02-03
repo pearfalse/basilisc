@@ -18,7 +18,6 @@ pub(super) struct TokenScanner {
 	token_buf: Option<TokenIter>,
 	char_out_buf: CharBuffer,
 	best_match: Option<&'static TokenLookupEntry>,
-	cur_token: Option<TokenIter>, // TODO: redundant? token_buf was once ArrayVec, not now tho
 	pinch: &'static [TokenLookupEntry],
 	is_lhs: bool,
 }
@@ -32,24 +31,18 @@ impl TokenScanner {
 			token_buf: None,
 			char_out_buf: CharBuffer::new(),
 			best_match: None,
-			cur_token: None,
 			pinch: PINCH_ALL,
 			is_lhs: true,
 		}
 	}
 
 	pub fn try_pull(&mut self) -> Option<u8> {
-		'ti: loop {
-			if let Some(ch) = self.cur_token.as_mut().and_then(Iterator::next) {
+		if let Some(iter) = self.token_buf.as_mut() {
+			if let Some(ch) = iter.next() {
 				return Some(ch.get());
 			}
-
-			// it's exhausted, try pulling from token_buf
-			if let new @ Some(_) = self.token_buf.take() {
-				self.cur_token = new;
-			} else {
-				break 'ti; // can't do anything else with tokens
-			}
+			// exhausted
+			self.token_buf = None;
 		}
 
 		self.char_out_buf.pop_front()
@@ -114,7 +107,6 @@ impl TokenScanner {
 			self.char_out_buf.extend(self.char_buf.iter().copied());
 		}
 		self.char_buf.clear();
-		self.cur_token = None;
 		self.pinch = PINCH_ALL;
 	}
 
@@ -283,7 +275,6 @@ impl fmt::Debug for TokenScanner {
 			.field("token_buf", &self.token_buf)
 			.field("char_out_buf", &&*self.char_out_buf)
 			.field("best_match", &self.best_match)
-			.field("cur_token", &self.cur_token)
 			.field("pinch", &PinchDebug::new(self))
 			.finish()
 	}
@@ -297,19 +288,6 @@ mod tests_try_pull {
 
 	#[test]
 	fn head() {
-		let mut scanner = TokenScanner::new();
-		scanner.cur_token = Some(TokenIter::new_direct(nonzero!(1u8)));
-		assert_eq!(Some(1), scanner.try_pull());
-		assert_eq!(None, scanner.try_pull());
-
-		scanner.cur_token = Some(TokenIter::new_indirect(nonzero!(0xc6u8), nonzero!(0xffu8)));
-		assert_eq!(Some(0xc6), scanner.try_pull());
-		assert_eq!(Some(0xff), scanner.try_pull());
-		assert_eq!(None, scanner.try_pull());
-	}
-
-	#[test]
-	fn in_queue() {
 		let mut scanner = TokenScanner::new();
 		scanner.token_buf = Some(TokenIter::new_direct(nonzero!(1u8)));
 		assert_eq!(Some(1), scanner.try_pull());
