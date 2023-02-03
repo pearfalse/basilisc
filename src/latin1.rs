@@ -56,20 +56,22 @@ pub(crate) trait CharExt {
 }
 
 impl CharExt for char {
+	#[inline]
 	fn from_risc_os_latin1(src: u8) -> char {
 		LATIN1_MAP[src as usize]
 	}
 
 	fn as_risc_os_latin1(self) -> Option<u8> {
 		let this = &(self as u32);
-		// ASCII printable, C0 direct
-		if (0x00..=0x7e).contains(this) {
+		// ASCII printable, C0 direct, raw DEL
+		if (0x00..=0x7f).contains(this) {
 			return Some(self as u8);
 		}
 		// C0 soft forms
 		if (0x2400..=0x241f).contains(this) {
 			return Some((self as u32 - 0x2400) as u8);
 		}
+		// DEL soft form
 		if *this == 0x2421 {
 			return Some(0x7f);
 		}
@@ -95,5 +97,16 @@ mod tests {
 		assert_eq!(Some(0x7f), '\u{2421}'.as_risc_os_latin1());
 		assert_eq!(Some(0xff), 'ÿ'.as_risc_os_latin1());
 		assert_eq!(None, 'ア'.as_risc_os_latin1());
+	}
+
+	#[test]
+	fn roundtrip_consistency() {
+		// `as_risc_os_latin1` has bespoke logic that can theoretically get out of sync with the
+		// basic lookup
+
+		for i in 0u8..=255 {
+			let ch = char::from_risc_os_latin1(i);
+			assert_eq!(Some(i), ch.as_risc_os_latin1());
+		}
 	}
 }
