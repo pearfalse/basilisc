@@ -202,6 +202,16 @@ impl TokenScanner {
 					// all keywords *except* LET move us to RHS
 					self.is_lhs = false;
 				}
+
+				match *self.char_buf {
+					[] => {},
+					[ch] => {
+						self.char_buf.clear(); // `narrow` wants to re-add it
+						self.narrow(ch);
+					},
+					_ => unreachable!("considered re-narrow with char_buf len {}; possible?",
+						self.char_buf.len()),
+				};
 				return;
 			}
 		}
@@ -402,6 +412,7 @@ mod tests {
 
 	#[test]
 	fn found_regressions() {
+		assert_output(b"OFWHEN", b"\xca\xc9");
 		assert_output(b"ENDPR", b"ENDPR");
 		assert_output(b"PRINT\"it works\"", b"\xf1\"it works\"");
 	}
