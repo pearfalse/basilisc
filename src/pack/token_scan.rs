@@ -65,8 +65,10 @@ impl TokenScanner {
 			if let Some(char_buf_len) = NonZeroU8::new(self.char_buf.len() as u8) {
 				// (an empty char_buf wouldn't be useful)
 				debug_assert!(self.pinch.len() < PINCH_ALL.len());
-				let abbr_match = self.pinch.iter()
-					.find(|&&(ref kw, _)| kw.min_abbrev_len() == Some(char_buf_len));
+				let abbr_match = self.pinch.iter().find(|&&(ref kw, _)| {
+					let min_abbrev_len = kw.min_abbrev_len();
+					min_abbrev_len.is_some() && min_abbrev_len <= Some(char_buf_len)
+				});
 				if let Some((_kw, ti)) = abbr_match {
 					self.commit_to(ti);
 					return;
@@ -364,6 +366,7 @@ mod tests {
 	fn min_abbrev() {
 		assert_output(b"MO.2", b"\xeb2");
 		assert_output(b"P.\"yes\"", b"\xf1\"yes\"");
+		assert_output(b"PRIN.\"yes\"", b"\xf1\"yes\"");
 	}
 
 	#[test]
