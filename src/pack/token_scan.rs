@@ -76,6 +76,7 @@ impl TokenScanner {
 			},
 			(false, true) => {
 				// reset pinch, but this char will never match
+				self.flush_char_buf();
 				self.pinch = PINCH_ALL;
 				self.char_out_buf.push(ch);
 				set_lhs!(char);
@@ -223,6 +224,12 @@ impl TokenScanner {
 		}
 
 		// move all chars as-is
+		self.flush_char_buf();
+
+		self.pinch = PINCH_ALL;
+	}
+
+	fn flush_char_buf(&mut self) {
 		self.char_out_buf.extend(mem::replace(
 			&mut self.char_buf, Default::default()
 			).into_iter());
@@ -412,7 +419,15 @@ mod tests {
 	}
 
 	#[test]
+	fn swap_regression() {
+		assert_output(b"OR(q", b"\x84(q");
+	}
+
+	#[test]
 	fn found_regressions() {
+		assert_output(b"+$STR$", b"+$\xc3");
+		assert_output(b"+$STR$ERL", b"+$\xc3\x9e");
+		assert_output(b"W%OF", b"W%\xca");
 		assert_output(b"OFWHEN", b"\xca\xc9");
 		assert_output(b"ENDPR", b"ENDPR");
 		assert_output(b"PRINT\"it works\"", b"\xf1\"it works\"");
