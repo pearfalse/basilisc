@@ -5,7 +5,7 @@ use std::{num::NonZeroU16, io};
 use arrayvec::ArrayVec;
 use nonzero_ext::nonzero;
 
-use crate::support::{NextByte, IoObject};
+use crate::support::IoObject;
 
 mod gaps;
 use gaps::*;
@@ -155,7 +155,11 @@ impl<'a> Parser<'a>
 		while let Some(byte) = self.inner.read_next()? {
 			match byte {
 				b'\r' => continue, // blunt way of handling CRLF
-				b'\n' => { self.is_eof = false; break }, // end of line
+				b'\n' => {
+					self.is_eof = false;
+					self.flush_token_scanner()?; // reset token scanning, sort of
+					break
+				}, // end of line
 				_ => {},
 			};
 			match state {
@@ -190,13 +194,7 @@ impl<'a> Parser<'a>
 			};
 		}
 
-		self.token_scan.flush();
-
-		let mut flushed_bytes = token_scan::CharBuffer::new();
-		while let Some(b) = self.token_scan.try_pull() {
-			flushed_bytes.push(b);
-		}
-		self.try_add_bytes(&*flushed_bytes)?;
+		self.flush_token_scanner()?;
 
 		let final_line_number = match state {
 			LineParser::BeforeLineNumber => return Ok(None),
@@ -207,11 +205,21 @@ impl<'a> Parser<'a>
 		Ok(Some(final_line_number))
 	}
 
+	fn flush_token_scanner(&mut self) -> Result<()> {
+		self.token_scan.flush();
+		let mut flushed_bytes = token_scan::CharBuffer::new();
+		while let Some(b) = self.token_scan.try_pull() {
+					flushed_bytes.push(b);
+				}
+		self.try_add_bytes(&*flushed_bytes)?;
+		Ok(())
+	}
+
 	pub fn write(self, target: &mut dyn io::Write) -> Result<()> {
 		let lines = self.into_lines()?;
 
 		for line in lines {
-			target.write_all(&*line.contents)?;
+			line.write(target)?;
 		}
 
 		target.write_all(&[0x0d, 0xff])?;
@@ -242,7 +250,7 @@ impl<'a> Parser<'a>
 		self.token_scan.push(byte);
 
 		// narrowing can release a token too
-		while let Some(b) = self.token_scan.try_pull() {
+		if let Some(b) = self.token_scan.try_pull() {
 			self.try_add_bytes(&[b])?;
 		}
 
@@ -255,7 +263,7 @@ impl<'a> Parser<'a>
 			let old_buf_len = self.buf.len() as u16;
 			move || Error::LineTooLong {
 				length: match old_buf_len.saturating_add(add_len) {
-					fits if fits <= u16::MAX => fits,
+					fits if fits <= u16::MAX => fits, // ???
 					too_big => panic!("tried to create line length {}, which is impossibly large",
 						too_big),
 				},
@@ -334,15 +342,25 @@ mod test_parser {
 		}
 	}
 
+	#[test]
+	fn known_regressions() {
+		expect_success(b"CASEr%OF\nWHEN", &[
+			(10, b"\xc8\x8er%\xca"),
+			(20, b"\xc9"),
+		], true);
+	}
+
 	fn expect_success(input: &[u8], output: &[(u16, &[u8])], set_numbers: bool) {
 		let mut cursor = io::Cursor::new(input);
 		let mut parser = Parser::new(&mut cursor);
 
 		let expected_nl_count = input.iter().filter(|b| **b == b'\n').count();
 
-		for _ in 0..expected_nl_count {
+		for _ln in 0..expected_nl_count {
+			println!("line {}: {:?}", _ln, &parser.token_scan);
 			assert_eq!(Ok(true), parser.next_line());
 		}
+		println!("line {}: {:?}", expected_nl_count, &parser.token_scan);
 		assert_eq!(Ok(false), parser.next_line());
 
 		assert_eq!(parser.lines.len(), output.len());

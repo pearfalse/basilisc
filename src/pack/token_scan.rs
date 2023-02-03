@@ -18,7 +18,7 @@ pub(super) struct TokenScanner {
 	token_buf: Option<TokenIter>,
 	char_out_buf: CharBuffer,
 	best_match: Option<&'static TokenLookupEntry>,
-	cur_token: Option<TokenIter>,
+	cur_token: Option<TokenIter>, // TODO: redundant? token_buf was once ArrayVec, not now tho
 	pinch: &'static [TokenLookupEntry],
 	is_lhs: bool,
 }
@@ -101,7 +101,7 @@ impl TokenScanner {
 	}
 
 	pub fn flush(&mut self) {
-		if let Some((kw, ti)) = self.best_match.filter(|(kw, _)|
+		if let Some((kw, ti)) = self.best_match.take().filter(|(kw, _)|
 			kw.len().get() as usize == self.char_buf.len()
 		) {
 			// crush best_match chars into token equiv
@@ -114,6 +114,8 @@ impl TokenScanner {
 			self.char_out_buf.extend(self.char_buf.iter().copied());
 		}
 		self.char_buf.clear();
+		self.cur_token = None;
+		self.pinch = PINCH_ALL;
 	}
 
 	fn narrow(&mut self, ch: u8) {
