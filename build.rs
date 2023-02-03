@@ -300,7 +300,7 @@ token_map![TOKEN_MAP_DIRECT,
 	(0xc9, "WHEN"),
 	(0xca, "OF"),
 	(0xcb, "ENDCASE", nongreedy),
-	(0xcc, "ELSE", abbr 2),
+	// ELSE, but in multiline IF statements; handled separately
 	(0xcd, "ENDIF", nongreedy),
 	(0xce, "ENDWHILE", nongreedy),
 	(0xcf, "PTR", abbr 2, nongreedy),

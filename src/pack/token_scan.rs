@@ -21,11 +21,36 @@ pub(super) struct TokenScanner {
 	best_match: Option<&'static TokenLookupEntry>,
 	pinch: &'static [TokenLookupEntry],
 	is_lhs: bool,
+	else_hack: ElseHack,
 }
 
 static PINCH_ALL: &'static [TokenLookupEntry] = crate::token_data::LOOKUP_MAP.as_slice();
 
+// ELSE tokenises differently if we are in a multi-line IF
+// TODO: this *stacks*
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ElseHack {
+	// nothing special
+	Normal,
+	// THEN was just tokenised
+	OnThen,
+	// previous THEN was last token before flushing; use different ELSE
+	UseEndifElse,
+}
+
+impl ElseHack {
+	pub(super) const THEN: u8 = 0x8c;
+	pub(super) const ELSE: u8 = 0x8b;
+	pub(super) const ALT_ELSE: u8 = 0xcc;
+	pub(super) const ENDIF: u8 = 0xcd;
+
+	const fn alt_else() -> TokenIter {
+		TokenIter::new_direct(nonzero_ext::nonzero!(0xccu8))
+	}
+}
+
 impl TokenScanner {
+
 	pub fn new() -> Self {
 		Self {
 			char_buf: CharBuffer::new(),
@@ -34,6 +59,7 @@ impl TokenScanner {
 			best_match: None,
 			pinch: PINCH_ALL,
 			is_lhs: true,
+			else_hack: ElseHack::Normal,
 		}
 	}
 
@@ -69,6 +95,15 @@ impl TokenScanner {
 				}
 			}
 		}
+
+		// ELSE hack
+		if self.else_hack == ElseHack::OnThen && ch != b' ' {
+			// ELSE hack; this is a THEN, and if it's the last non-space char before the next
+			// flush, consider us to be in a multi-line IF
+			println!("ELSE HACK: switching to UseEndifElse");
+			self.else_hack = ElseHack::UseEndifElse;
+		}
+
 		match (Self::is_keyword_char(ch), self.pinch.is_empty()) {
 			(true, true) => {
 				// already failed, possible variable name, do not restart searching
@@ -102,14 +137,47 @@ impl TokenScanner {
 			// crush best_match chars into token equiv
 			// allow nongreedy keywords to do this if char_buf matches
 			let ti = ti.clone();
+			let ti_first = ti.peek_first();
 			self.char_out_buf.extend(ti.map(NonZeroU8::get));
 			self.char_out_buf.extend(self.char_buf.iter().copied().skip(kw.len().get() as usize));
+
+			if ti_first == ElseHack::ENDIF && self.else_hack == ElseHack::UseEndifElse {
+				// reset else hack
+				self.else_hack = ElseHack::Normal;
+			}
 		}
 		else {
 			self.char_out_buf.extend(self.char_buf.iter().copied());
 		}
 		self.char_buf.clear();
 		self.pinch = PINCH_ALL;
+
+		if self.else_hack == ElseHack::OnThen {
+			// we are in a multi-line IF, change the ELSE token
+			self.else_hack = ElseHack::UseEndifElse;
+		}
+	}
+
+	fn set_token_buf(&mut self, new: TokenIter) {
+		let first = new.clone().peek_first();
+		self.token_buf = Some(new);
+
+		// apply ELSE hack
+		match (first, self.else_hack) {
+			(ElseHack::THEN, ElseHack::Normal) => {
+				self.else_hack = ElseHack::OnThen;
+			},
+
+			(ElseHack::ELSE, ElseHack::UseEndifElse) => {
+				self.token_buf = Some(ElseHack::alt_else());
+			},
+
+			(ElseHack::ENDIF, ElseHack::UseEndifElse) => {
+				self.else_hack = ElseHack::Normal;
+			}
+
+			_ => {},
+		}
 	}
 
 	fn narrow(&mut self, ch: u8) {
@@ -160,7 +228,6 @@ impl TokenScanner {
 
 			// a good match, but there might be a longer one
 			[ref pair @ (ref kw, _), ..] if eq_char_buf!(kw) => {
-				println!("nongreedy/imperfect match: {:?}", kw);
 				self.best_match = Some(pair);
 			},
 
@@ -177,14 +244,21 @@ impl TokenScanner {
 
 	fn commit_to(&mut self, ti: &TokenIter) {
 		self.best_match = None; // forget that, we have a definite winner
-		self.token_buf = Some(ti.clone());
+		self.set_token_buf(ti.clone());
 		self.char_buf.clear(); // all bytes accounted for
 		self.pinch = PINCH_ALL; // ready for future stuff
 
-		if ti.clone().peek_first() != 0xe9 {
-			// all keywords *except* LET move us to RHS
-			self.is_lhs = false;
-		}
+		match ti.clone().peek_first() {
+			0xe9 => {
+				// all keywords *except* LET move us to RHS
+				self.is_lhs = false;
+			},
+			ElseHack::THEN if self.else_hack == ElseHack::Normal => {
+				self.else_hack = ElseHack::OnThen;
+			},
+
+			_ => {},
+		};
 	}
 
 	fn commit_best_match(&mut self) {
@@ -199,7 +273,7 @@ impl TokenScanner {
 			};
 			if should_take {
 				// take this subset of characters, use it
-				self.token_buf = Some(best.clone());
+				self.set_token_buf(best.clone());
 
 				// preserve unconsumed chars to re-add them
 				self.char_buf.remove_first(kw.len().get() as usize);

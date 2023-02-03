@@ -419,7 +419,7 @@ mod test_parser {
 		expand(1, b"\xc8", &[13,0,1,5, 0xc8]);
 	}
 
-	#[test]	
+	#[test]
 	fn interrupt_indirect_with_another() {
 		// RISC OS behaviour with an invalid token reference is not consistent OS-wide:
 		// - BASIC rejects the line outright ("Syntax error")

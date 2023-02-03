@@ -343,6 +343,19 @@ mod test_parser {
 	}
 
 	#[test]
+	fn else_hack() {
+		use super::token_scan::ElseHack;
+
+		expect_success(b"ELSE\nTHEN\nELSE\nENDIF\nELSE", &[
+			(10, &[ElseHack::ELSE]), // normal ELSE to start with
+			(20, &[ElseHack::THEN]), // trailing THEN activates else hack
+			(30, &[ElseHack::ALT_ELSE]), // use alt multiline ELSE
+			(40, &[ElseHack::ENDIF]), // ENDIF ends things
+			(50, &[ElseHack::ELSE]), // normal ELSE again
+		], true);
+	}
+
+	#[test]
 	fn known_regressions() {
 		expect_success(b"CASEr%OF\nWHEN", &[
 			(10, b"\xc8\x8er%\xca"),
