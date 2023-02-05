@@ -45,9 +45,6 @@ impl ElseHack {
 	}
 
 	#[inline]
-	fn is_on_then(&self) -> bool { self.on_then }
-
-	#[inline]
 	fn use_alt_else(&self) -> bool { self.stack > 0 }
 
 	fn push(&mut self) {
@@ -60,11 +57,6 @@ impl ElseHack {
 		// an over-pop isn't a problem for us
 		self.stack = self.stack.saturating_sub(1);
 		self.on_then = false;
-	}
-
-	#[inline]
-	fn set_on_then(&mut self) {
-		self.on_then = true;
 	}
 }
 
@@ -160,7 +152,7 @@ impl TokenScanner {
 		self.char_buf.clear();
 		self.pinch = PINCH_ALL;
 
-		if self.else_hack.is_on_then() {
+		if self.else_hack.on_then {
 			// we are in a multi-line IF, change the ELSE token
 			self.else_hack.push();
 		}
@@ -172,7 +164,7 @@ impl TokenScanner {
 		// apply ELSE hack
 		match first {
 			ElseHack::THEN => {
-				self.else_hack.set_on_then();
+				self.else_hack.on_then = true;
 			},
 
 			ElseHack::ELSE if self.else_hack.use_alt_else() => {
@@ -263,7 +255,7 @@ impl TokenScanner {
 				self.is_lhs = false;
 			},
 			ElseHack::THEN => {
-				self.else_hack.set_on_then();
+				self.else_hack.on_then = true;
 			},
 
 			_ => {},
@@ -375,6 +367,7 @@ impl fmt::Debug for TokenScanner {
 			.field("char_buf", &HexArray(&*self.char_buf))
 			.field("char_out_buf", &&*self.char_out_buf)
 			.field("best_match", &self.best_match)
+			.field("else_hack", &self.else_hack)
 			.field("pinch", &PinchDebug::new(self))
 			.finish()
 	}
