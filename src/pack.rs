@@ -343,7 +343,7 @@ mod test_parser {
 	}
 
 	#[test]
-	fn else_hack() {
+	fn else_hack_flat() {
 		use super::token_scan::ElseHack;
 
 		expect_success(b"ELSE\nTHEN\nELSE\nENDIF\nELSE", &[
@@ -352,6 +352,23 @@ mod test_parser {
 			(30, &[ElseHack::ALT_ELSE]), // use alt multiline ELSE
 			(40, &[ElseHack::ENDIF]), // ENDIF ends things
 			(50, &[ElseHack::ELSE]), // normal ELSE again
+		], true);
+	}
+
+	#[test]
+	fn else_hack_nested() {
+		use super::token_scan::ElseHack;
+
+		expect_success(b"ELSE\nTHEN\nELSE\nTHEN\nELSE\nENDIF\nELSE\nENDIF\nELSE", &[
+			(10, &[ElseHack::ELSE]), // normal ELSE to start with
+			(20, &[ElseHack::THEN]), // trailing THEN activates else hack
+			(30, &[ElseHack::ALT_ELSE]), // use alt multiline ELSE
+			(40, &[ElseHack::THEN]), // trailing THEN activates else hack
+			(50, &[ElseHack::ALT_ELSE]), // use alt multiline ELSE
+			(60, &[ElseHack::ENDIF]), // ENDIF pops 1 layer
+			(70, &[ElseHack::ALT_ELSE]), // still technically in an ENDIF
+			(80, &[ElseHack::ENDIF]), // ENDIF resets
+			(90, &[ElseHack::ELSE]), // normal ELSE again
 		], true);
 	}
 

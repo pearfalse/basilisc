@@ -3,7 +3,6 @@ use std::{fmt, mem};
 
 use arrayvec::ArrayVec;
 
-use crate::keyword::RawKeyword;
 use crate::{
 	token_data::TokenLookupEntry,
 	token_iter::TokenIter,
@@ -28,29 +27,49 @@ static PINCH_ALL: &'static [TokenLookupEntry] = crate::token_data::LOOKUP_MAP.as
 
 // ELSE tokenises differently if we are in a multi-line IF
 // TODO: this *stacks*
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ElseHack {
-	// nothing special
-	Normal,
-	// THEN was just tokenised
-	OnThen,
-	// previous THEN was last token before flushing; use different ELSE
-	UseEndifElse,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) struct ElseHack {
+	stack: u32,
+	on_then: bool,
 }
 
 impl ElseHack {
 	pub(super) const THEN: u8 = 0x8c;
 	pub(super) const ELSE: u8 = 0x8b;
+	#[allow(dead_code)] // used by a `pack` test
 	pub(super) const ALT_ELSE: u8 = 0xcc;
 	pub(super) const ENDIF: u8 = 0xcd;
 
-	const fn alt_else() -> TokenIter {
+	#[inline]
+	fn alt_else() -> TokenIter {
 		TokenIter::new_direct(nonzero_ext::nonzero!(0xccu8))
+	}
+
+	#[inline]
+	fn is_on_then(&self) -> bool { self.on_then }
+
+	#[inline]
+	fn use_alt_else(&self) -> bool { self.stack > 0 }
+
+	fn push(&mut self) {
+		self.stack = self.stack.checked_add(1)
+			.expect("ElseHack stack overflow");
+		self.on_then = false;
+	}
+
+	fn pop(&mut self) {
+		// an over-pop isn't a problem for us
+		self.stack = self.stack.saturating_sub(1);
+		self.on_then = false;
+	}
+
+	#[inline]
+	fn set_on_then(&mut self) {
+		self.on_then = true;
 	}
 }
 
 impl TokenScanner {
-
 	pub fn new() -> Self {
 		Self {
 			char_buf: CharBuffer::new(),
@@ -59,7 +78,7 @@ impl TokenScanner {
 			best_match: None,
 			pinch: PINCH_ALL,
 			is_lhs: true,
-			else_hack: ElseHack::Normal,
+			else_hack: ElseHack::default(),
 		}
 	}
 
@@ -97,11 +116,10 @@ impl TokenScanner {
 		}
 
 		// ELSE hack
-		if self.else_hack == ElseHack::OnThen && ch != b' ' {
+		if self.else_hack.is_on_then() && ch != b' ' {
 			// ELSE hack; this is a THEN, and if it's the last non-space char before the next
 			// flush, consider us to be in a multi-line IF
-			println!("ELSE HACK: switching to UseEndifElse");
-			self.else_hack = ElseHack::UseEndifElse;
+			self.else_hack.push();
 		}
 
 		match (Self::is_keyword_char(ch), self.pinch.is_empty()) {
@@ -141,9 +159,9 @@ impl TokenScanner {
 			self.char_out_buf.extend(ti.map(NonZeroU8::get));
 			self.char_out_buf.extend(self.char_buf.iter().copied().skip(kw.len().get() as usize));
 
-			if ti_first == ElseHack::ENDIF && self.else_hack == ElseHack::UseEndifElse {
+			if ti_first == ElseHack::ENDIF {
 				// reset else hack
-				self.else_hack = ElseHack::Normal;
+				self.else_hack.pop();
 			}
 		}
 		else {
@@ -152,9 +170,9 @@ impl TokenScanner {
 		self.char_buf.clear();
 		self.pinch = PINCH_ALL;
 
-		if self.else_hack == ElseHack::OnThen {
+		if self.else_hack.is_on_then() {
 			// we are in a multi-line IF, change the ELSE token
-			self.else_hack = ElseHack::UseEndifElse;
+			self.else_hack.push();
 		}
 	}
 
@@ -163,17 +181,17 @@ impl TokenScanner {
 		self.token_buf = Some(new);
 
 		// apply ELSE hack
-		match (first, self.else_hack) {
-			(ElseHack::THEN, ElseHack::Normal) => {
-				self.else_hack = ElseHack::OnThen;
+		match first {
+			ElseHack::THEN => {
+				self.else_hack.set_on_then();
 			},
 
-			(ElseHack::ELSE, ElseHack::UseEndifElse) => {
+			ElseHack::ELSE if self.else_hack.use_alt_else() => {
 				self.token_buf = Some(ElseHack::alt_else());
 			},
 
-			(ElseHack::ENDIF, ElseHack::UseEndifElse) => {
-				self.else_hack = ElseHack::Normal;
+			ElseHack::ENDIF => {
+				self.else_hack.pop();
 			}
 
 			_ => {},
@@ -249,12 +267,12 @@ impl TokenScanner {
 		self.pinch = PINCH_ALL; // ready for future stuff
 
 		match ti.clone().peek_first() {
-			0xe9 => {
+			0xe9 => { // TODO make constant for this
 				// all keywords *except* LET move us to RHS
 				self.is_lhs = false;
 			},
-			ElseHack::THEN if self.else_hack == ElseHack::Normal => {
-				self.else_hack = ElseHack::OnThen;
+			ElseHack::THEN => {
+				self.else_hack.set_on_then();
 			},
 
 			_ => {},
