@@ -253,7 +253,7 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 		match (args.use_line_numbers, parser.referenced_lines().get(line.line_number)) {
 			(UnpackLineNumbersOption::AlwaysShow, _) |
 			(UnpackLineNumbersOption::Minimal, true)
-				=> write!(output, "{:5} ", line.line_number)?,
+				=> write!(output, "{:5}", line.line_number)?,
 
 			(UnpackLineNumbersOption::Minimal, false) if there_are_any_referenced_lines
 				=> output.write_all(&[32u8; 6][..])?,
@@ -294,7 +294,10 @@ fn run_pack(args: PackArgs) -> Result<(), PackError> {
 			&mut stdout_lock
 		},
 		path => {
-			output_file = fs::File::create(path)?;
+			output_file = fs::File::options()
+				.write(true)
+				.truncate(true)
+				.open(path)?;
 			&mut output_file
 		},
 	};
@@ -312,12 +315,8 @@ fn run_pack(args: PackArgs) -> Result<(), PackError> {
 	};
 
 	let mut parser = pack::Parser::new(input);
-	let mut cnt = 0u16;
-	while parser.next_line()? {
-		cnt += 1;
-	}
+	while parser.next_line()? { }
 
 	parser.write(output)?;
-
 	Ok(())
 }
