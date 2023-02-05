@@ -106,10 +106,10 @@ impl TokenScanner {
 		}
 
 		// ELSE hack
-		if self.else_hack.is_on_then() && ch != b' ' {
-			// ELSE hack; this is a THEN, and if it's the last non-space char before the next
-			// flush, consider us to be in a multi-line IF
-			self.else_hack.push();
+		if ({
+    let ref this = self.else_hack; this.on_then }) && ch != b' ' {
+			// ELSE hack; we could've been in a multi-line IF, but we aren't
+			self.else_hack.on_then = false;
 		}
 
 		match (Self::is_keyword_char(ch), self.pinch.is_empty()) {
@@ -479,6 +479,11 @@ mod tests {
 		assert_output(b"AND$", b"\x80$");
 		assert_output(b"EXT1", b"\xa2\x31");
 		assert_output(b"REPORT$", b"\xf6$");
+	}
+
+	#[test]
+	fn else_hack() {
+		assert_output(b"IFaTHENbELSEc", b"\xe7a\x8cb\x8bc");
 	}
 
 	#[test]

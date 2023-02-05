@@ -374,10 +374,16 @@ mod test_parser {
 
 	#[test]
 	fn known_regressions() {
+		expect_success(b"IFaTHENb\nIFcTHENdELSEe",
+			&[
+				(10, b"\xe7a\x8cb"),
+				(20, b"\xe7c\x8cd\x8be"),
+			], true);
+		expect_success(b".\nc$=\"\":f%=TRUE", &[(10, b"."), (20, b"c$=\"\":f%=\xb9")], true);
 		expect_success(b"CASEr%OF\nWHEN", &[
-			(10, b"\xc8\x8er%\xca"),
-			(20, b"\xc9"),
-		], true);
+				(10, b"\xc8\x8er%\xca"),
+				(20, b"\xc9"),
+			], true);
 	}
 
 	fn expect_success(input: &[u8], output: &[(u16, &[u8])], set_numbers: bool) {
