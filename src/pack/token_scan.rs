@@ -15,7 +15,6 @@ pub(super) type CharBuffer = ArrayVec<u8, { crate::keyword::MAX_LEN as usize }>;
 
 pub(super) struct TokenScanner {
 	char_buf: CharBuffer,
-	token_buf: Option<TokenIter>,
 	char_out_buf: CharBuffer,
 	best_match: Option<&'static TokenLookupEntry>,
 	pinch: &'static [TokenLookupEntry],
@@ -73,7 +72,6 @@ impl TokenScanner {
 	pub fn new() -> Self {
 		Self {
 			char_buf: CharBuffer::new(),
-			token_buf: None,
 			char_out_buf: CharBuffer::new(),
 			best_match: None,
 			pinch: PINCH_ALL,
@@ -83,14 +81,6 @@ impl TokenScanner {
 	}
 
 	pub fn try_pull(&mut self) -> Option<u8> {
-		if let Some(iter) = self.token_buf.as_mut() {
-			if let Some(ch) = iter.next() {
-				return Some(ch.get());
-			}
-			// exhausted
-			self.token_buf = None;
-		}
-
 		self.char_out_buf.pop_front()
 	}
 
@@ -176,9 +166,8 @@ impl TokenScanner {
 		}
 	}
 
-	fn set_token_buf(&mut self, new: TokenIter) {
+	fn set_token_buf(&mut self, mut new: TokenIter) {
 		let first = new.clone().peek_first();
-		self.token_buf = Some(new);
 
 		// apply ELSE hack
 		match first {
@@ -187,7 +176,7 @@ impl TokenScanner {
 			},
 
 			ElseHack::ELSE if self.else_hack.use_alt_else() => {
-				self.token_buf = Some(ElseHack::alt_else());
+				new = ElseHack::alt_else();
 			},
 
 			ElseHack::ENDIF => {
@@ -195,7 +184,9 @@ impl TokenScanner {
 			}
 
 			_ => {},
-		}
+		};
+
+		self.char_out_buf.extend(new.map(NonZeroU8::get));
 	}
 
 	fn narrow(&mut self, ch: u8) {
@@ -382,7 +373,6 @@ impl fmt::Debug for TokenScanner {
 
 		f.debug_struct("TokenScanner")
 			.field("char_buf", &HexArray(&*self.char_buf))
-			.field("token_buf", &self.token_buf)
 			.field("char_out_buf", &&*self.char_out_buf)
 			.field("best_match", &self.best_match)
 			.field("pinch", &PinchDebug::new(self))
@@ -390,25 +380,6 @@ impl fmt::Debug for TokenScanner {
 	}
 }
 
-#[cfg(test)]
-mod tests_try_pull {
-	use super::*;
-
-	use nonzero_ext::nonzero;
-
-	#[test]
-	fn head() {
-		let mut scanner = TokenScanner::new();
-		scanner.token_buf = Some(TokenIter::new_direct(nonzero!(1u8)));
-		assert_eq!(Some(1), scanner.try_pull());
-		assert_eq!(None, scanner.try_pull());
-
-		scanner.token_buf = Some(TokenIter::new_indirect(nonzero!(0xc6u8), nonzero!(0xffu8)));
-		assert_eq!(Some(0xc6), scanner.try_pull());
-		assert_eq!(Some(0xff), scanner.try_pull());
-		assert_eq!(None, scanner.try_pull());
-	}
-}
 
 #[cfg(test)]
 mod tests {
@@ -512,6 +483,10 @@ mod tests {
 
 	#[test]
 	fn swap_regression() {
+		assert_output(
+			b"FALSETHEN:TRUE:",
+			b"FALSETHEN:\xb9:"
+		);
 		assert_output(b"OR(q", b"\x84(q");
 	}
 
