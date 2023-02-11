@@ -49,7 +49,7 @@ impl ElseHack {
 
 	fn push(&mut self) {
 		self.stack = self.stack.checked_add(1)
-			.expect("ElseHack stack overflow");
+			.expect("ElseHack stack overflow"); // should never happen. you can't make enough lines
 		self.on_then = false;
 	}
 
@@ -206,7 +206,7 @@ impl TokenScanner {
 
 		// then back byte
 		while let Some((right, remain)) = self.pinch.split_last() {
-			if right.0.as_ascii_str().as_bytes()
+			if right.0.as_bytes()
 			.get(pinch_idx as usize).map(|&b| b > ch) == Some(true) {
 				// too flabby on the right
 				self.pinch = remain;
