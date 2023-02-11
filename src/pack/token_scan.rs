@@ -98,8 +98,7 @@ impl TokenScanner {
 		}
 
 		// ELSE hack
-		if ({
-    let ref this = self.else_hack; this.on_then }) && ch != b' ' {
+		if self.else_hack.on_then && ch != b' ' {
 			// ELSE hack; we could've been in a multi-line IF, but we aren't
 			self.else_hack.on_then = false;
 		}
@@ -165,6 +164,7 @@ impl TokenScanner {
 		match first {
 			ElseHack::THEN => {
 				self.else_hack.on_then = true;
+				self.is_lhs = true;
 			},
 
 			ElseHack::ELSE if self.else_hack.use_alt_else() => {
@@ -249,16 +249,11 @@ impl TokenScanner {
 		self.char_buf.clear(); // all bytes accounted for
 		self.pinch = PINCH_ALL; // ready for future stuff
 
-		match ti.clone().peek_first() {
-			0xe9 => { // TODO make constant for this
-				// all keywords *except* LET move us to RHS
-				self.is_lhs = false;
-			},
-			ElseHack::THEN => {
-				self.else_hack.on_then = true;
-			},
-
-			_ => {},
+		self.is_lhs = if ti.clone().peek_first() == ElseHack::THEN {
+			self.else_hack.on_then = true;
+			true
+		} else {
+			false
 		};
 	}
 
@@ -280,10 +275,7 @@ impl TokenScanner {
 				self.char_buf.remove_first(kw.len().get() as usize);
 				self.pinch = PINCH_ALL;
 
-				if best.clone().peek_first() != 0xe9 {
-					// all keywords *except* LET move us to RHS
-					self.is_lhs = false;
-				}
+				self.is_lhs = false;
 
 				match *self.char_buf {
 					[] => {},
@@ -465,6 +457,7 @@ mod tests {
 	fn left_right_tokens() {
 		assert_output(b"HIMEM=HIMEM", b"\xd3=\x93");
 		assert_output(b"TIME:TIME", b"\xd1:\xd1");
+		assert_output(b"IFTIME=1THENTIME=5", b"\xe7\x91=1\x8c\xd1=5");
 	}
 
 	#[test]
