@@ -24,16 +24,14 @@ pub(crate) struct RawKeyword {
 	/// - b6 to b4: unused, must be 0
 	/// - b3 to b0: minimum abbreviation length (if 0, no abbrev)
 	flags: u8,
-	/// Iteration indexing state
-	iter_state: u8,
+	/// Unused
+	_reserved: u8,
 	/// Length of string (number of meaningful bytes in `chars`)
 	len: NonZeroU8,
 }
 
 impl PartialEq for RawKeyword {
 	fn eq(&self, other: &Self) -> bool {
-		self.assert_iter_state();
-		other.assert_iter_state();
 		Self::eq_guts(self, other)
 	}
 }
@@ -114,10 +112,10 @@ impl RawKeyword {
 	/// Returns populated bytes of a keyword.
 	#[inline]
 	pub fn as_bytes(&self) -> &[u8] {
-		let slice: &[u8] = self.chars.as_slice();
+		let start: *const u8 = self.chars.as_ptr();
 		unsafe {
 			// SAFETY: we don't safely allow construction of byte slices that don't fit
-			core::slice::from_raw_parts(slice.as_ptr(), self.len.get() as usize)
+			core::slice::from_raw_parts(start, self.len.get() as usize)
 		}
 	}
 
@@ -144,12 +142,19 @@ impl RawKeyword {
 	///
 	/// # Safety
 	///
-	/// All preconditions of values specified in [`Self::new`] must pass.
+	/// The following preconditions must match:
+	///
+	/// - The first `n` bytes of `src`, where `n` is the keyword length in bytes, must be printing
+	///   ASCII characters, excluding space;
+	/// - The `src[10]` must not set any bits in `flags::RESERVED`;
+	/// - The minimum abbrev length in `src[10]` must be less than the string length or zero;
+	/// - `src[11]` is reserved and must be zero.
+	///
+	/// Violating any of the above conditions may (but is not guaranteed to) violate memory safety.
 	pub(crate) const unsafe fn new_unchecked(src: [u8; STORE_SIZE as usize]) -> Self {
-		debug_assert!(src[STORE_SIZE as usize - 1] != 0);
-		let r: Self = mem::transmute(src);
-		r.assert_iter_state();
-		r
+		let raw_len = src[STORE_SIZE as usize - 1];
+		debug_assert!(raw_len > 0 && raw_len <= MAX_LEN);
+		mem::transmute(src)
 	}
 
 	/// Returns a copy of the raw keyword store.
@@ -174,7 +179,7 @@ impl RawKeyword {
 	}
 
 	#[inline]
-	pub fn min_abbrev_len(&self) -> Option<NonZeroU8> {
+	pub const fn min_abbrev_len(&self) -> Option<NonZeroU8> {
 		NonZeroU8::new(self.flags & flags::MIN_ABBREV_LEN_MASK)
 	}
 
@@ -197,37 +202,17 @@ impl RawKeyword {
 		self.flags & flags::GREEDY != 0
 	}
 
-	/// Moves the keyword into an iterator over its bytes.
-	pub(crate) fn into_iter(self) -> IntoIter {
-		self.assert_iter_state();
-		IntoIter(self)
-	}
-
 	/// Iterates over the contents of the keyword.
 	///
 	/// This method just clones `self`, and moves the clone into an iterator, hence
 	/// the maybe unexpected return type.
-	pub(crate) fn iter(&self) -> IntoIter {
-		self.clone().into_iter()
-	}
-
-	#[inline(always)]
-	const fn assert_iter_state(&self) {
-		debug_assert!(self.iter_state == 0);
-	}
-}
-
-impl IntoIterator for RawKeyword {
-	type IntoIter = IntoIter;
-	type Item = u8;
-
-	fn into_iter(self) -> Self::IntoIter {
-		Self::into_iter(self)
+	pub(crate) fn iter<'a>(&'a self) -> Iter<'a> {
+		Iter::new(self)
 	}
 }
 
 impl<'a> IntoIterator for &'a RawKeyword {
-	type IntoIter = IntoIter;
+	type IntoIter = Iter<'a>;
 	type Item = u8;
 
 	fn into_iter(self) -> Self::IntoIter {
@@ -237,36 +222,51 @@ impl<'a> IntoIterator for &'a RawKeyword {
 
 
 #[derive(Debug, Clone)]
-pub(crate) struct IntoIter(RawKeyword);
+pub(crate) struct Iter<'a> {
+	keyword: &'a RawKeyword,
+	pos: u8,
+}
 
-impl IntoIter {
-	pub(crate) const fn empty() -> Self {
-		let mut empty_keyword = unsafe {
-			// SAFETY: this mirrors an empty iteration
-			RawKeyword::new_unchecked([
-				33, 0, 0,  0, 0, 0,  0, 0, 0, // chars
-				0, // flags
-				0, // iteration state (kept blank as a hack for assertions in new_unchecked)
-				1, // length (matches iteration state, must be non-zero)
-			])
-		};
-		empty_keyword.iter_state = empty_keyword.len.get();
-		Self(empty_keyword)
+static EMPTY: RawKeyword = unsafe {
+	// SAFETY: this should match preconditions on RawKeyword::new_unchecked
+	RawKeyword::new_unchecked([
+		33, 0, 0,  0, 0, 0,  0, 0, 0, // chars
+		0, // flags
+		0, // reserved
+		1, // length (must be non-zero)
+	])
+};
+
+impl Iter<'static> {
+	pub(crate) fn empty() -> Self {
+		Self {
+			keyword: &EMPTY,
+			pos: 1,
+		}
 	}
 }
 
-impl Iterator for IntoIter {
+impl<'a> Iter<'a> {
+	fn new(keyword: &'a RawKeyword) -> Self {
+		Self {
+			keyword,
+			pos: 0,
+		}
+	}
+}
+
+impl<'a> Iterator for Iter<'a> {
 	type Item = u8;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		let next_byte = match self.0.iter_state {
-			end @ 0 | end if end >= self.0.len.get() => None,
+		let next_byte = match self.pos {
+			end @ 0 | end if end >= self.keyword.len.get() => None,
 			good => Some(good),
-		}.and_then(|idx| self.0.chars.get(idx as usize));
+		}.and_then(|idx| self.keyword.chars.get(idx as usize));
 
 		if next_byte.is_some() {
-			debug_assert!(self.0.iter_state < MAX_LEN);
-			self.0.iter_state += 1;
+			debug_assert!(self.pos < MAX_LEN);
+			self.pos += 1;
 		}
 
 		next_byte.copied()
@@ -301,5 +301,12 @@ mod tests {
 		assert_eq!(Some(b"P".as_slice()),
 			crate::token_data::TOKEN_MAP_DIRECT[0xf1]
 			.unwrap().min_abbrev_bytes());
+	}
+
+	#[test]
+	fn token_iter() {
+		assert_eq!(b"PRINT", &*crate::token_data::TOKEN_MAP_DIRECT[0xf1]
+			.unwrap().iter()
+			.collect::<ArrayVec<u8, {MAX_LEN as usize}>>());
 	}
 }
