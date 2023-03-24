@@ -28,7 +28,7 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 		// reduce the length by 1, then move all items up one place
 		unsafe {
 			let dst = self.as_mut_ptr();
-			let src = dst.cast_const().add(1);
+			let src = (dst as *const T).add(1);
 			ptr::copy(src, dst, new_len);
 			self.set_len(new_len);
 		}
@@ -51,6 +51,7 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 		if must_drop {
 			// copy items to here for dropping later
 			unsafe {
+				// we go through a raw slice to keep miri happy
 				let dst = slice::from_raw_parts_mut(drop_sites.as_mut_ptr(), x)
 					as *mut [MaybeUninit<T>] as *mut T;
 				ptr::copy_nonoverlapping(self.as_ptr(), dst, x);
@@ -62,7 +63,7 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 			// pre-declare src and dst pointers to keep miri happy (it seems to dislike fetching
 			// two pointers inline due to the side-by-side method calls to `&self` and `&mut self`)
 			let dst = self.as_mut_ptr();
-			let src = dst.cast_const().add(x);
+			let src = (dst as *const T).add(x);
 			ptr::copy(src, dst, new_len);
 			self.set_len(new_len);
 		}
