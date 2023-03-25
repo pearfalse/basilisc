@@ -1,3 +1,5 @@
+//! Miscellaneous support code.
+
 use std::{fmt::{self, Debug}, io, convert::Infallible, fmt::Write};
 
 mod per_line_bits;

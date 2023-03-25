@@ -108,8 +108,7 @@ pub struct Parser<'a> {
 	is_eof: bool,
 }
 
-impl<'a> Parser<'a>
-{
+impl<'a> Parser<'a> {
 	pub fn new(src: IoObject<'a>) -> Self {
 		Self {
 			buf: ArrayVec::new(),

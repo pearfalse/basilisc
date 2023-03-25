@@ -1,7 +1,16 @@
-use std::{mem::{ManuallyDrop, self, MaybeUninit}, ptr, slice};
+//! Container module for additional features added to `ArrayVec`.
+//!
+//! See [ArrayVecExt] for more.
 
+use std::{mem::{ManuallyDrop, self, MaybeUninit}, ptr, slice};
 use arrayvec::ArrayVec;
 
+/// Extension trait for additional batch-removing methods needed on ArrayVec.
+///
+/// While only useful in practice on an element type of `u8`, this trait supports any arbitrary
+/// type, including those that do not implement [`Copy`](rust_Copy).
+///
+/// [rust_Copy]: https://doc.rust-lang.org/std/marker/trait.Copy.html
 pub(crate) trait ArrayVecExt<T> {
 	/// Pops the first element from the front of the ArrayVec, shifting all others forward one
 	/// position.
@@ -12,7 +21,7 @@ pub(crate) trait ArrayVecExt<T> {
 	/// # Panics
 	///
 	/// Panics if `x` exceeds the ArrayVec's length, or if any removed item's `Drop` implementation
-	/// panics. If it does, other removed item may leak.
+	/// panics (which may cause other items to leak).
 	fn remove_first(&mut self, x: usize);
 }
 
