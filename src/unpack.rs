@@ -591,8 +591,8 @@ mod test_parser {
 		// RISC OS behaviour with an invalid token reference is not consistent OS-wide:
 		// - BASIC rejects the line outright ("Syntax error")
 		// - !Edit skips over the invalid token
-		// - !Zap, prints the invalid token as its raw Latin-1 bytes
-		// We choose the 'preserve as-is' option here, given that basc-unpack's job is one of
+		// - !Zap prints the invalid token as its raw Latin-1 bytes
+		// We choose the 'preserve as-is' option here, given that basc-unpack's priority is
 		//  round-trip preservation.
 		expand(0, b"\xc7\xc6PRINT", &[13,0,0,7, 0xc7, 0xc6, 0xf1]);
 	}
