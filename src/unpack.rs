@@ -1,5 +1,5 @@
 use core::convert::Infallible;
-use std::io;
+use std::{io, fmt::Debug, mem};
 
 use crate::{
 	support::{ArrayVecExt, NextByte, PerLineBits},
@@ -89,9 +89,9 @@ enum StringState {
 
 
 #[derive(Debug)]
-pub struct Parser<I> {
+pub struct Parser<I: NextByte> {
 	/// The inner byte I/O object
-	inner: I,
+	inner: Peekable<I>,
 	/// Buffer used for parsing, to minimise reallocations between lines
 	buffer: Vec<u8>,
 	/// The state of parsing metdata about the current line
@@ -103,7 +103,7 @@ pub struct Parser<I> {
 	/// Buffer for potential lookups that didn't match anything, or for format hacks
 	byte_flush: ByteFlush,
 	/// Iterator for remaining characters of a previous lookup match
-	cur_token: keyword::Iter<'static>,
+	cur_token: KeywordIter2<'static>,
 	/// Have we reached the end of the BASIC file?
 	have_reached_end: bool,
 	/// Are we in a string literal? (if so, don't expand tokens)
@@ -114,17 +114,17 @@ pub struct Parser<I> {
 	referenced_lines: PerLineBits,
 }
 
-impl<I> Parser<I>
+impl<I: NextByte> Parser<I>
 where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 	pub fn new(inner: I) -> Self {
 		Self {
-			inner,
+			inner: Peekable::new(inner),
 			buffer: Vec::with_capacity(256), // TODO how big can a line be?
 			line_state: LineState::default(),
 			line_ref: None,
 			token_lookup: None,
 			byte_flush: ArrayVec::new_const(),
-			cur_token: keyword::Iter::empty(),
+			cur_token: KeywordIter2::default(),
 			have_reached_end: false,
 			string_state: StringState::default(),
 			extant_lines: PerLineBits::new(),
@@ -299,7 +299,16 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 		// try lookup and conversion to token
 		match decode_map.get_flat(next_byte as usize) {
 			Some(s) => {
-				self.cur_token = s.iter();
+				let should_insert_space = if ! s.is_greedy() {
+					// if next byte is also a token char, or token, insert a space
+					// this undoes an optimisation by BASIC squashers that would destroy the
+					// program syntax on a plaintext roundtrip
+					self.inner.peek().map(|b| b >= 0x7f
+						|| (b'A'..=b'Z').contains(&b)
+						|| (b'a'..=b'z').contains(&b)) // TODO: check if this is right
+						.unwrap_or(false)
+				} else { false };
+				self.cur_token = KeywordIter2::new(s.iter(), should_insert_space);
 			},
 			None => {
 				// no match
@@ -309,7 +318,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			}
 		};
 
-		None // nothing to push in the caller
+		None // no ASCII byte to pass through
 	}
 
 	fn update_line_ref(&mut self, next_byte: u8) -> UnpackResult<bool> {
@@ -361,8 +370,16 @@ struct Peekable<I: NextByte> {
 }
 
 impl<I: NextByte> Peekable<I> {
-	fn new(inner: I) -> Self {
-		Self { inner, next: Ok(None) }
+	fn new(mut inner: I) -> Self {
+		let next = inner.next_byte();
+		Self { inner, next }
+	}
+
+	fn peek(&self) -> Option<u8> {
+		match self.next {
+			Ok(Some(b)) => Some(b),
+			_ => None,
+		}
 	}
 }
 
@@ -370,12 +387,7 @@ impl<I: NextByte> NextByte for Peekable<I> {
 	type Error = I::Error;
 
 	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
-		if let b @ Ok(Some(_)) = std::mem::replace(&mut self.next, Ok(None)) {
-			self.next = self.inner.next_byte();
-			b
-		} else {
-			self.inner.next_byte()
-		}
+		mem::replace(&mut self.next, self.inner.next_byte())
 	}
 }
 
@@ -396,6 +408,116 @@ impl<I: NextByte> Debug for Peekable<I> {
 		f.debug_struct("Peekable")
 			.field("next", &NextFormat::<'_, I>(&self.next))
 			.finish_non_exhaustive()
+	}
+}
+
+/// The KeywordIter we all know and love, but with the possibility of yielding a space (U+0020)
+/// immediately afterwards.
+#[derive(Debug, Clone)]
+struct KeywordIter2<'a> {
+	keyword_iter: keyword::Iter<'a>,
+	trail_space: bool,
+}
+
+impl<'a> KeywordIter2<'a> {
+	fn new(keyword_iter: keyword::Iter<'a>, trail_space: bool) -> Self {
+		Self {
+			keyword_iter,
+			trail_space,
+		}
+	}
+}
+
+impl<'a> Default for KeywordIter2<'a> {
+	fn default() -> Self {
+		Self {
+			keyword_iter: keyword::Iter::empty(),
+			trail_space: false,
+		}
+	}
+}
+
+impl<'a> Iterator for KeywordIter2<'a> {
+	type Item = <keyword::Iter<'a> as Iterator>::Item;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if let b @ Some(_) = self.keyword_iter.next() {
+			b
+		} else {
+			mem::replace(&mut self.trail_space, false).then_some(b'\x20')
+		}
+	}
+}
+
+
+
+#[cfg(test)]
+mod test_support_structs {
+	use super::*;
+	use arrayvec::ArrayVec;
+
+	struct NbSlice<'a> {
+		slice: &'a [u8],
+	}
+
+	impl<'a> NextByte for NbSlice<'a> {
+		type Error = core::convert::Infallible;
+
+		fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
+			Ok(if let Some((first, rest)) = self.slice.split_first() {
+				self.slice = rest;
+				Some(*first)
+			} else {
+				None
+			})
+		}
+	}
+
+	impl<'a> From<&'a [u8]> for NbSlice<'a> {
+		fn from(slice: &'a [u8]) -> Self {
+			Self { slice }
+		}
+	}
+
+	#[test]
+	fn peek() {
+		let mut p = Peekable::new(NbSlice::from(b"123".as_slice()));
+
+		for i in b'1'..=b'3' {
+			assert_eq!(Some(i), p.peek());
+			assert_eq!(Ok(Some(i)), p.next_byte());
+		}
+
+		assert_eq!(None, p.peek());
+		assert_eq!(Ok(None), p.next_byte());
+		assert_eq!(None, p.peek());
+	}
+
+	// this is a function cause we can't use a const impl Index on stable (as of 1.68)
+	#[allow(non_snake_case)]
+	fn PRINT() -> &'static keyword::RawKeyword {
+		token_data::TOKEN_MAP_DIRECT[0xf1].as_ref().unwrap()
+	}
+
+	#[test]
+	fn keyword_iter2_with_space() {
+		assert_eq!(
+			&*KeywordIter2::new(PRINT().iter(), true).collect::<ArrayVec<u8, 6>>(),
+			b"PRINT ",
+		);
+	}
+
+	#[test]
+	fn keyword_iter2_no_space() {
+		assert_eq!(
+			&*KeywordIter2::new(PRINT().iter(), false).collect::<ArrayVec<u8, 5>>(),
+			b"PRINT",
+		);
+	}
+
+	#[test]
+	fn keyword_iter2_default() {
+		assert!(KeywordIter2::default().next().is_none());
 	}
 }
 
@@ -565,7 +687,7 @@ mod test_parser {
 	}
 
 	#[test]
-	fn todo_catch_compressed_forms() {
+	fn catch_compressed_forms() {
 		/*
 		There are some token forms in a tokenised BASIC file that do not survive a plaintext
 		round-trip if converted as-is. For instance, the sequence `a3 8c` corresponds to
@@ -576,6 +698,9 @@ mod test_parser {
 		syntactic meaning intact on repacking, even if the byte-for-byte comparison no longer holds
 		(and `basc` is not a BASIC squasher, so removing said spaces can remain out of scope).
 		*/
-		expand(10, b"FALSE THEN", b"\xa3\x8c");
+		expand(10, b"FALSE THEN", b"\r\0\x0a\x06\xa3\x8c");
+
+		// but don't do it on greedy tokens
+		expand(11, b"ANDREA", b"\r\0\x0b\x08\x80REA");
 	}
 }
