@@ -355,6 +355,51 @@ trait U8Ext: core::cmp::Eq + core::cmp::PartialEq<u8> {
 impl U8Ext for u8 {}
 
 
+struct Peekable<I: NextByte> {
+	inner: I,
+	next: Result<Option<u8>, <I as NextByte>::Error>,
+}
+
+impl<I: NextByte> Peekable<I> {
+	fn new(inner: I) -> Self {
+		Self { inner, next: Ok(None) }
+	}
+}
+
+impl<I: NextByte> NextByte for Peekable<I> {
+	type Error = I::Error;
+
+	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
+		if let b @ Ok(Some(_)) = std::mem::replace(&mut self.next, Ok(None)) {
+			self.next = self.inner.next_byte();
+			b
+		} else {
+			self.inner.next_byte()
+		}
+	}
+}
+
+impl<I: NextByte> Debug for Peekable<I> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		struct NextFormat<'a, I: NextByte>(&'a Result<Option<u8>, <I as NextByte>::Error>);
+
+		impl<'a, I: NextByte> Debug for NextFormat<'a, I> {
+			fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+				match *self.0 {
+					Ok(Some(b)) => write!(f, "byte({:02x})", b),
+					Ok(None) => f.write_str("None"),
+					Err(_) => f.write_str("Err(_)"),
+				}
+			}
+		}
+
+		f.debug_struct("Peekable")
+			.field("next", &NextFormat::<'_, I>(&self.next))
+			.finish_non_exhaustive()
+	}
+}
+
+
 #[cfg(test)]
 mod test_parser {
 	use super::*;
