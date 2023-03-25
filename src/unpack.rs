@@ -518,4 +518,19 @@ mod test_parser {
 		assert!(!sut.extant_lines.get(1));
 		assert!(!sut.referenced_lines.get(20));
 	}
+
+	#[test]
+	fn todo_catch_compressed_forms() {
+		/*
+		There are some token forms in a tokenised BASIC file that do not survive a plaintext
+		round-trip if converted as-is. For instance, the sequence `a3 8c` corresponds to
+		`FALSETHEN`, but because `FALSE` is a non-greedy token, it will pass through the
+		TokenScanner as its original ASCII (the same is true on Acorn systems).
+
+		Ideally, we would find such situations and insert a space between them to keep the
+		syntactic meaning intact on repacking, even if the byte-for-byte comparison no longer holds
+		(and `basc` is not a BASIC squasher, so removing said spaces can remain out of scope).
+		*/
+		expand(10, b"FALSE THEN", b"\xa3\x8c");
+	}
 }
