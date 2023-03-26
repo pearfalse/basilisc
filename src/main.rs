@@ -20,7 +20,7 @@ use support::IoObject;
 #[path = "../meta-src/keyword.rs"] mod keyword;
 #[path = "../meta-src/token_iter.rs"] mod token_iter;
 #[path = "../meta-src/subarray.rs"] mod subarray;
-#[cfg(test)]
+#[cfg(any(test, doc))]
 #[path = "../meta-src/cooked_keyword.rs"] mod cooked_keyword;
 
 

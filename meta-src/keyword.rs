@@ -1,3 +1,4 @@
+//! (Raw) Keywords as used by `basc`, in its own serialised form.
 #![allow(dead_code)] // neither build.rs nor bin crate will ever use 100% of methods here
 
 use std::{fmt, num::NonZeroU8, mem};
@@ -5,13 +6,19 @@ use std::{fmt, num::NonZeroU8, mem};
 use arrayvec::ArrayVec;
 use ascii::{AsciiStr, AsAsciiStr, AsciiChar};
 
+/// Length of the longest known keyword.
 pub const MAX_LEN: u8 = 9;
+
+/// The size of `RawKeyword` in bytes.
 pub const STORE_SIZE: u8 = 12;
 
-/// A BASIC keyword, accessed through some backing store.
+/// A BASIC keyword, serialised in its own compact format.
 ///
-/// This type provides interfaces to BASIC keywords that are referenced from some fixed-size
-/// backing store, which `Keyword` may own or borrow.
+/// While it has no stability guarantees, `RawKeyword` aims to be compact, efficient, and well-
+/// aligned for 32- and 64-bit CPUs. The \[size, alignment\] of this struct are currently \[12, 4\].
+///
+/// `Option<RawKeyword>` is statically guaranteed to have the same type size as its unwrapped
+/// variant.
 #[derive(Clone, Copy)]
 #[repr(C)]
 #[repr(align(4))]
@@ -66,15 +73,31 @@ impl Ord for RawKeyword {
 	}
 }
 
+/// Namespace for flag bits.
 pub(crate) mod flags {
+	/// For keywords that may only match in lvalue position. Setting this alongside `RVALUE_ONLY`
+	/// is a logic error.
 	pub const LVALUE_ONLY         : u8 = 1<<7;
+
+	/// For keywords that may only match in rvalue position. Setting this alongside `LVALUE_ONLY`
+	/// is a logic error.
 	pub const RVALUE_ONLY         : u8 = 1<<6;
+
+	/// Marks a keyword as greedy (i.e. will match this token even if another potential keyword
+	/// character immediately follows).
 	pub const GREEDY              : u8 = 1<<5;
+
+	/// Marks the bytes reserved to hold the keyword minimum abbreviation length.
 	pub const MIN_ABBREV_LEN_MASK : u8 = 0b1111;
 
+	/// Bit mask for all bits not currently used to mean anything (these bits should be 0).
 	pub const RESERVED: u8 = !(LVALUE_ONLY | RVALUE_ONLY | GREEDY | MIN_ABBREV_LEN_MASK);
 }
 
+/// Different positions a keyword has to be in to tokenise a particular way. Most tokens will use
+/// [TokenPosition::Any].
+///
+/// The three values order themselves (smallest to largest) as: Any, Right, Left.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub(crate) enum TokenPosition {
@@ -85,6 +108,7 @@ pub(crate) enum TokenPosition {
 
 #[allow(dead_code)]
 #[doc(hidden)]
+/// These types must all have the same size.
 fn _assert_struct_size() {
 	static_assertions::assert_eq_size!([u8; STORE_SIZE as usize], RawKeyword, Option<RawKeyword>);
 }
@@ -174,11 +198,14 @@ impl RawKeyword {
 		}
 	}
 
+	/// Returns the length of the keyword's minimum abbreviation.
 	#[inline]
 	pub const fn min_abbrev_len(&self) -> Option<NonZeroU8> {
 		NonZeroU8::new(self.flags & flags::MIN_ABBREV_LEN_MASK)
 	}
 
+	/// Returns the keyword name, truncated to its minimum abbreviation (the trailing '.' is not
+	/// included).
 	#[inline]
 	pub fn min_abbrev(&self) -> Option<&AsciiStr> {
 		self.min_abbrev_len().map(|c| unsafe {
@@ -188,15 +215,13 @@ impl RawKeyword {
 		})
 	}
 
+	/// Returns `true` if the token uses greedy matching.
 	#[inline]
 	pub fn is_greedy(&self) -> bool {
 		self.flags & flags::GREEDY != 0
 	}
 
 	/// Iterates over the contents of the keyword.
-	///
-	/// This method just clones `self`, and moves the clone into an iterator, hence
-	/// the maybe unexpected return type.
 	pub(crate) fn iter<'a>(&'a self) -> Iter<'a> {
 		Iter::new(self)
 	}
@@ -212,6 +237,10 @@ impl<'a> IntoIterator for &'a RawKeyword {
 }
 
 
+/// An iterator over the characters of a keyword.
+///
+/// Logically, the yielded item is an [`AsciiChar`](ascii::AsciiChar), but for maximum compatibility
+/// with the crate's call sites, it yields them as [`u8`]s.
 #[derive(Debug, Clone)]
 pub(crate) struct Iter<'a> {
 	keyword: &'a RawKeyword,
@@ -239,6 +268,7 @@ impl Iter<'static> {
 }
 
 impl<'a> Iter<'a> {
+	/// Constructs a new iterator for a keyword.
 	fn new(keyword: &'a RawKeyword) -> Self {
 		Self {
 			keyword,

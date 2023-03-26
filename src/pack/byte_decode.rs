@@ -1,7 +1,9 @@
+//! Encoding conversion in I/O objects.
+
 use std::{
 	io,
 	ops::ControlFlow,
-	mem::{MaybeUninit, ManuallyDrop}, num::NonZeroUsize,
+	mem::ManuallyDrop, num::NonZeroUsize,
 };
 
 use nonzero_ext::nonzero;
@@ -13,6 +15,11 @@ use crate::{
 
 use super::Error;
 
+/// Handles converting to/from UTF-8 and RISC OS Latin-1 in byte streams.
+///
+/// Some UTF-8 characters will map to RISC OS Latin-1 characters in the encode process, but
+/// something needs to read the multiple bytes of said characters to know what to map in. This is
+/// that something.
 #[derive(Debug)]
 pub(super) struct ByteDecoder<'a> {
 	buf: *mut [u8], // heap storage
@@ -24,11 +31,15 @@ pub(super) struct ByteDecoder<'a> {
 impl<'a> ByteDecoder<'a> {
 	pub const DEFAULT_CAPACITY: NonZeroUsize = nonzero!(1usize<<16);
 
+	/// Constructs a new decoder from an I/O object with the default buffer capacity.
 	#[inline]
 	pub fn new(src: IoObject<'a>) -> Self {
 		Self::with_capacity(src, Self::DEFAULT_CAPACITY)
 	}
 
+	/// Constructs a new decoder from an I/O object with a specific buffer capacity.
+	///
+	/// The buffer will always be at least 4 bytes in size.
 	pub fn with_capacity(src: IoObject<'a>, capacity: NonZeroUsize) -> Self {
 		// - ManuallyDrop ensures that the original vec doesn't get dropped immediately
 		// - using vec![] ensures the buffer is initialised
@@ -47,6 +58,7 @@ impl<'a> ByteDecoder<'a> {
 		}
 	}
 
+	/// Reads the next encoding-mapped byte from the source.
 	pub fn read_next(&mut self) -> Result<Option<u8>, Error> {
 		let ch: char = loop {
 			match self.try_next_char()? {
@@ -83,7 +95,7 @@ impl<'a> ByteDecoder<'a> {
 			0x00..=0x7f => 1u8, // ASCII
 			0b110_00000..=0b110_11111 => 2,
 			0b1110_0000..=0b1110_1111 => 3,
-			// all Latin-1 conversions from the SMPs will fail, but we need the char for the error
+			// most Latin-1 conversions from the SMPs will fail, but we need the char for the error
 			0b11110_000..=0b11110_111 => 4,
 			_ => return Err(self.utf8_error())
 		};

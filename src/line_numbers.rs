@@ -24,6 +24,8 @@
 
 use thiserror::Error;
 
+/// A line number reference has three bytes of meaningful info, after the `0x8D` header (not
+/// included here).
 pub type Encoded = [u8; 3];
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +34,7 @@ pub enum DecodeError {
 	OutOfRange(u32),
 }
 
+/// Decodes a byte array into its equivalent numeric format.
 pub fn try_decode(encoded: Encoded) -> Result<u16, DecodeError> {
 	let a = encoded[0] as u32;
 	let b = encoded[1] as u32;

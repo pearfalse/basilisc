@@ -1,13 +1,43 @@
+//! Cooked keywords are high-level representations of BASIC keyword data, used by the build script
+//! to generate raw keyword data. See [`Keyword`] for more.
+
 use std::num::NonZeroU8;
 
 use ascii::{AsciiStr, AsAsciiStr as _};
 
 use crate::keyword;
 
+
+/// An error in keyword construction, if any constraints are not met.
+///
+/// The actual error cause is only relevant to humans, not to other code.
 #[derive(Debug)]
 pub(crate) struct KeywordCtorError(&'static str);
 
 
+/// Represents a BASIC keyword at a high level. `build.rs` uses this to hold its own representation
+/// of all BASIC keywords `basc` needs to know about, and uses it to construct the
+/// [`RawKeyword`](keyword::RawKeyword) arrays that `basc` will refer to at runtime.
+///
+/// A keyword's data is:
+///
+/// - A representable form in 2–9 ASCII characters.
+/// - A minimum abbreviation (optional).
+/// - The byte it tokenises to.
+/// - Which position it sits in (some property-style keywords tokenise to different bytes depending
+///   on if they are used as lvalues or not).
+/// - Whether or not the token is greedy (some keywords will be tokenised on match without needing
+///   a trailing space or punctuation mark to denote its end).
+///
+/// For the sake of the lookup algorithm in the final crate, this struct defines its own ordering
+/// rules as:
+///
+/// - Lexical ordering of full keyword;
+/// - Token position;
+/// - Abbreviation length.
+///
+/// While this means that keywords cannot be stably sorted, no two keywords should ever be equal to
+/// each other in the final data.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Keyword {
 	byte: NonZeroU8,
@@ -18,7 +48,14 @@ pub(crate) struct Keyword {
 }
 
 impl Keyword {
-	/// This function returns `Err(KeywordCtorError)` if any of these conditions are not met.
+	/// This function returns `Err([KeywordCtorError])` if any of these conditions are not met:
+	///
+	/// - The keyword must contain printable ASCII bytes only[^1].
+	/// - The keyword must be between 1 and 9 characters in length.
+	/// - If `min_abbrev` is populated, it must be between 1 and 7.
+	///
+	/// [^1]: `basc`'s tokeniser has more stringent requirements than this; this is just a small
+	/// step above what is required for memory safety.
 	pub fn try_new(
 		byte: u8,
 		keyword: &'static str,
@@ -33,7 +70,7 @@ impl Keyword {
 		let byte = NonZeroU8::new(byte).unwrap();
 
 		// length must be non-zero, but also small enough to be meaningful
-		if ! (1..=keyword::MAX_LEN as usize).contains(&keyword.len()) {
+		if ! (2..=keyword::MAX_LEN as usize).contains(&keyword.len()) {
 			return Err(KeywordCtorError(match keyword.len() {
 				0 => "string is empty",
 				_ => "string is too long"
@@ -56,6 +93,8 @@ impl Keyword {
 		})
 	}
 
+	/// Returns the keyword as the packed array format that [RawKeyword](keyword::RawKeyword) uses
+	/// internally.
 	pub fn as_array(&self) -> [u8; keyword::STORE_SIZE as usize] {
 		const S: usize = keyword::STORE_SIZE as usize;
 		let mut store = [0u8; S];
@@ -83,22 +122,26 @@ impl Keyword {
 		store
 	}
 
+	/// Gets the token byte for this keyword.
 	#[inline(always)]
     pub(crate) fn byte(&self) -> NonZeroU8 {
         self.byte
     }
 
+    /// Gets an ASCII string slice for this keyword's representation.
     #[inline(always)]
     pub(crate) fn keyword(&self) -> &AsciiStr {
         self.keyword
     }
 
+    /// Gets the minimum abbreviation length for this keyword.
     #[inline(always)]
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn min_abbrev(&self) -> Option<NonZeroU8> {
         self.min_abbrev
     }
 
+    /// Gets the position dependency for this keyword.
     #[inline(always)]
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn position(&self) -> keyword::TokenPosition {
@@ -120,7 +163,7 @@ impl Ord for Keyword {
 
 		// compare keyword, greedy, pos, abbr (not byte, that's output data)
 		self.keyword().cmp(other.keyword())
-			.then_with(|| self.greedy.cmp(&other.greedy))
+			.then_with(|| self.greedy.cmp(&other.greedy)) // TODO: necessary?
 			.then_with(|| self.position.cmp(&other.position))
 			.then_with(|| abbr(self).cmp(&abbr(other)))
 	}

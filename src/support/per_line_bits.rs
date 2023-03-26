@@ -1,3 +1,5 @@
+//! Bespoke bit array of a specific capacity.
+
 use core::{iter, slice};
 use std::fmt;
 
@@ -168,7 +170,6 @@ impl<'a> Iterator for Iter<'a> {
 
 
 /// Implementing struct for `IterSet` and `IterClear`.
-#[doc(hidden)]
 pub struct IterFiltered<'a, const S: bool = true> {
 	upper: iter::Enumerate<iter::Copied<slice::Iter<'a, u8>>>,
 	cur_byte: Option<(usize, u8)>,
@@ -185,6 +186,7 @@ impl<'a, const S: bool> fmt::Debug for IterFiltered<'a, S> {
 	}
 }
 
+/// Helper struct for `IterFiltered`'s [`Debug`](std::fmt::Debug) impl.
 struct IterFilteredPos<'a, const S: bool>(&'a IterFiltered<'a, S>);
 impl<'a, const S: bool> fmt::Debug for IterFilteredPos<'a, S> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -196,7 +198,6 @@ impl<'a, const S: bool> fmt::Debug for IterFilteredPos<'a, S> {
 }
 
 impl<'a, const S: bool> IterFiltered<'a, S> {
-
 	fn new(upper: &'a PerLineBits) -> Self {
 		Self {
 			upper: upper.store.iter().copied().enumerate(),

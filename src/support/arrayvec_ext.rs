@@ -8,7 +8,7 @@ use arrayvec::ArrayVec;
 /// Extension trait for additional batch-removing methods needed on ArrayVec.
 ///
 /// While only useful in practice on an element type of `u8`, this trait supports any arbitrary
-/// type, including those that do not implement [`Copy`](rust_Copy).
+/// type, including those that do not implement [`Copy`](std::marker::Copy).
 ///
 /// [rust_Copy]: https://doc.rust-lang.org/std/marker/trait.Copy.html
 pub(crate) trait ArrayVecExt<T> {

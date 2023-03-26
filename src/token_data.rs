@@ -1,3 +1,7 @@
+//! All compiled data `basc` knows about BASIC keywords.
+//!
+//! Most of the interesting data is generated from a high-level representation in `build.rs`.
+
 include!(concat!(env!("OUT_DIR"), "/token_data.rs"));
 
 #[cfg(test)]
@@ -10,7 +14,7 @@ mod test_lookup {
 
 	use crate::{
 		keyword::RawKeyword,
-		subarray::{SubArray, traits::*},
+		subarray::SubArray,
 	};
 	use super::{TOKEN_MAP_DIRECT, TOKEN_MAP_C6, TOKEN_MAP_C7, TOKEN_MAP_C8};
 

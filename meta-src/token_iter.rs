@@ -1,3 +1,5 @@
+//! An iterator over token bytes of a keyword.
+
 use core::num::NonZeroU8;
 use std::{iter::FusedIterator, fmt};
 
@@ -25,6 +27,7 @@ impl TokenIter {
 		}
 	}
 
+	/// Returns the number of bytes yet to be yielded in the iterator.
 	pub(crate) fn len(&self) -> u8 {
 		match (self.a, self.b) {
 			(Some(_), Some(_)) => 2,
@@ -33,6 +36,7 @@ impl TokenIter {
 		}
 	}
 
+	/// Peeks the next byte that this iterator will yield.
 	pub(crate) fn peek_first(&self) -> u8 {
 		self.a.map(NonZeroU8::get).unwrap_or(0)
 	}
@@ -53,13 +57,14 @@ impl fmt::Debug for TokenIter {
 /// A wrapper for `TokenIter` whose [`Display`][1] impl will output Rust code to construct the
 /// inner value. Designed for build scripts only.
 ///
-/// [1]: https://doc.rust-lang.org/stable/std/fmt/trait.Display.html
+/// [1]: [std::fmt::Display]
 pub(crate) struct Codegen {
 	iter: TokenIter,
 	add_unsafe_blocks: bool,
 }
 
 impl Codegen {
+	/// Helper function for the `Display` impl.
 	fn get_num(&self, field: Option<NonZeroU8>) -> Result<NZu8Codegen, fmt::Error> {
 		field.map(|n| NZu8Codegen {
 			value: n,
@@ -67,6 +72,10 @@ impl Codegen {
 		}).ok_or(fmt::Error)
 	}
 
+	/// Constructs a new `Codegen` from a token byte iterator.
+	///
+	/// If `add_unsafe_blocks` is `true`, the [`NonZeroU8::new_unchecked`] declaration will add
+	/// its own `unsafe` block.
 	#[allow(dead_code)] // not really dead code, it's used in build script
 	pub(crate) fn from(iter: TokenIter, add_unsafe_blocks: bool) -> Self {
 		Self { iter, add_unsafe_blocks }

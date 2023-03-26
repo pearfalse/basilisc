@@ -16,23 +16,41 @@ use token_scan::TokenScanner;
 mod byte_decode;
 use byte_decode::ByteDecoder;
 
+/// The maximum length a BASIC line can be (`u8::MAX` minus 4 bytes of header).
 const MAX_LINE_LEN: usize = 251;
+
+/// The maximum number of lines allowable in a BASIC file.
 const LINE_NUMBER_CAP: u16 = 0xff00;
 
+
+/// All errors that can occur when encoding.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+	/// User tried to add too many lines to the program.
 	#[error("too many lines in program (limit is 65280)")]
 	TooManyLines,
+
+	/// Program cannot be fully numbered, due to existing pre-numbered lines.
 	#[error("too many lines to fully number the program (had room for {max_possible}, but needed {needed}")]
 	TooManyUnnumberedLines { max_possible: u16, needed: u32 },
+
+	/// Given line was too long after tokenisation.
 	#[error("line too long (must be under 252 chars, but was {length})")]
 	LineTooLong { length: u16 },
+
+	/// Requested line number was too large.
 	#[error("line number too large ({found}, must be less than 65280)")]
 	LineNumberOutOfRange { found: u32 },
+
+	/// Source file contained invalid UTF-8.
 	#[error("invalid UTF-8 character at file position {start_pos}")]
 	InvalidUtf8 { start_pos: u64 },
+
+	/// Source file contained a UTF-8 character that has no RISC OS Latin-1 equivalent.
 	#[error("character '{}' has no RISC OS Latin-1 equivalent", (.0).escape_unicode())]
 	NoLatin1Char(char),
+
+	/// I/O error.
 	#[error("I/O error: {0}")]
 	IoError(#[from] std::io::Error),
 }
@@ -71,6 +89,7 @@ impl PartialEq for Error {
 	}
 }
 
+/// A line in the final program.
 #[derive(Debug)]
 pub struct Line {
 	line_number: u16,
@@ -78,6 +97,7 @@ pub struct Line {
 }
 
 impl Line {
+	/// Writes the serialised form of this line to the given I/O object.
 	pub fn write(&self, target: &mut dyn io::Write) -> io::Result<()> {
 		debug_assert!(self.contents.len() <= MAX_LINE_LEN);
 		let hdr_len = unsafe {
@@ -91,14 +111,17 @@ impl Line {
 	}
 }
 
+/// A line in the final program that might not yet have a line number.
 #[derive(Debug)]
 struct UnnumberedLine {
 	line_number: Option<u16>,
 	contents: Box<[u8]>,
 }
 
+/// Common result type for this module.
 type Result<T> = ::std::result::Result<T, Error>;
 
+/// The core structure for encoding a BASIC file.
 #[derive(Debug)]
 pub struct Parser<'a> {
 	buf: ArrayVec<u8, MAX_LINE_LEN>,
@@ -109,6 +132,7 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+	/// Constructs a new parser.
 	pub fn new(src: IoObject<'a>) -> Self {
 		Self {
 			buf: ArrayVec::new(),
@@ -119,6 +143,9 @@ impl<'a> Parser<'a> {
 		}
 	}
 
+	/// Attempts to read and conver the next line of the file.
+	///
+	/// Upon success, returns whether the parser expects there to be more lines to convert.
 	pub fn next_line(&mut self) -> Result<bool> {
 		// we need early return for fuse behaviour
 		if self.is_eof { return Ok(false); }
@@ -214,6 +241,7 @@ impl<'a> Parser<'a> {
 		Ok(())
 	}
 
+	/// Writes the converted BASIC file to the given I/O object.
 	pub fn write(self, target: &mut dyn io::Write) -> Result<()> {
 		let lines = self.into_lines()?;
 

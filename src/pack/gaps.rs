@@ -1,9 +1,13 @@
+//! Finds contiguous groups of lines with no user-supplied line number.
+
 use std::marker::PhantomData;
 
 use sptr::Strict;
 
 use super::UnnumberedLine;
 
+/// Encloses a mutable slice of lines with no line number, as well as contextual info about
+/// possible line numbers before and after.
 #[derive(Debug)]
 pub(super) struct Gap<'a> {
 	pub before: Option<u16>,
@@ -11,6 +15,8 @@ pub(super) struct Gap<'a> {
 	pub lines: &'a mut [UnnumberedLine],
 }
 
+/// Iterator to find [`Gap`]s within a slice of [`UnnumberedLine`]s. Both input and output
+/// slices are mutable to allow insertion of line numbers by some downstream algorithm.
 #[derive(Debug)]
 pub(super) struct FindGaps<'a> {
 	start: *mut UnnumberedLine,
@@ -19,6 +25,7 @@ pub(super) struct FindGaps<'a> {
 }
 
 impl<'a> FindGaps<'a> {
+	/// Constructs a gap-finding iterator from a slice.
 	pub fn within(lines: &'a mut [UnnumberedLine]) -> Self {
 		let start = lines.as_mut_ptr();
 		Self {

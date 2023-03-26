@@ -1,3 +1,5 @@
+//! Handles &FFB-to-text conversion.
+
 use core::convert::Infallible;
 use std::{io, fmt::Debug, mem};
 
@@ -12,6 +14,9 @@ use arrayvec::ArrayVec;
 use thiserror::Error;
 
 
+/// Represents a line of BASIC in the original file.
+///
+/// Line contents are always heap-allocated.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Line {
 	pub line_number: u16,
@@ -19,21 +24,30 @@ pub struct Line {
 }
 
 impl Line {
+	/// Constructs a new line from its constituent parts.
 	pub fn new(line_number: u16, data: Box<[u8]>) -> Self {
 		Self { line_number, data }
 	}
 }
 
 
+/// Contains all errors that `basc` could encounter when unpacking a file.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum UnpackError {
+	/// The input file ended mid-line, or without seeing the designated EOF marker
 	#[error("unexpected end of file")]
 	UnexpectedEof,
+
+	/// Did not encounter the expected line start byte
 	#[error("expected 0Dh byte to start a new line, got {:02x} instead", .0)]
 	UnexpectedByte(u8),
+
+	/// I/O error occurred
 	#[error("io error: {0}")]
 	IoError(String),
-	#[error("invalid line number reference")]
+
+	/// Encountered invalid line number reference (65281 or higher)
+	#[error("invalid line number reference (must be less than 62580)")]
 	InvalidLineReference,
 }
 
@@ -60,6 +74,7 @@ type TokenLookup = Option<u8>;
 type ByteFlush = ArrayVec<u8, 5>; // decoded line number reference is the biggest
 type LineNumberStage = ArrayVec<u8, 2>; // don't need to stage the third byte
 
+/// State machine for parsing a line header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum LineState {
 	/// Not currently in a line
@@ -79,15 +94,23 @@ enum LineState {
 }
 
 
+/// State machine for tracking whether the parse is in a string literal. This controls escaping
+/// of literal " chars (U+0022), as well as how high-bit-set bytes are interpreted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum StringState {
+	/// Not currently in a string literal
 	#[default]
 	NotInString,
+
+	/// Currently in a string literal
 	InString,
+
+	/// Hovering over a closing quote mark (a second one indicates an escaped U+0022)
 	MaybeClosed,
 }
 
 
+/// Handles the operation of decoding a BBC BASIC file.
 #[derive(Debug)]
 pub struct Parser<I: NextByte> {
 	/// The inner byte I/O object
@@ -116,6 +139,7 @@ pub struct Parser<I: NextByte> {
 
 impl<I: NextByte> Parser<I>
 where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
+	/// Constructs a new parser based on an I/O object.
 	pub fn new(inner: I) -> Self {
 		Self {
 			inner: Peekable::new(inner),
@@ -132,10 +156,17 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 		}
 	}
 
+	/// Returns a bit set tracking which lines exist in the file.
 	pub(crate) fn extant_lines(&self) -> &PerLineBits { &self.extant_lines }
 
+	/// Returns a bit set tracking which lines have been referenced in `GOTO`/`GOSUB` statements.
 	pub(crate) fn referenced_lines(&self) -> &PerLineBits { &self.referenced_lines }
 
+	/// Processes another line of the input stream.
+	///
+	/// A return value of `Ok(None)` indicates that the intended EOF marker has been found. Upon
+	/// encountering this marker, further calls to this method will return `Ok(None)` without
+	/// attempting to read more bytes from the inner stream.
 	pub fn next_line(&mut self) -> UnpackResult<Option<Line>> {
 		self.buffer.clear();
 		self.line_state = LineState::HaveNothing;
@@ -280,7 +311,6 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 	}
 
 	fn update_lookup_stage(&mut self, next_byte: u8) -> Option<u8> {
-		use crate::subarray::traits::SubArrayFlat;
 		debug_assert!(self.cur_token.clone().next().is_none());
 
 		let (decode_map, byte_if_fail) = match self.token_lookup.take() {
@@ -353,7 +383,10 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 	}
 }
 
+/// Minimal ergonomic extension methods for the byte primitive.
 trait U8Ext: core::cmp::Eq + core::cmp::PartialEq<u8> {
+	/// Returns `true` if the byte in `self` is the token for `GOTO` or `GOSUB`.
+	// TODO: can't we just look for 8d?
 	fn is_goto_or_gosub(&self) -> bool {
 		// impl assumes that LINE_DEPENDENT_KEYWORD_BYTES is 2 bytes wide
 		let [a, b] = token_data::LINE_DEPENDENT_KEYWORD_BYTES;
@@ -364,17 +397,26 @@ trait U8Ext: core::cmp::Eq + core::cmp::PartialEq<u8> {
 impl U8Ext for u8 {}
 
 
+/// A reimplementation of [std::iter::Peekable] for types that implement [`NextByte`].
+///
+/// [`Peekable::peek`] differs from the stdlib implementation in two ways:
+///
+/// - the peeked byte, if found, is copied;
+/// - `Err` values are coalesced into `None`.
 struct Peekable<I: NextByte> {
 	inner: I,
 	next: Result<Option<u8>, <I as NextByte>::Error>,
 }
 
 impl<I: NextByte> Peekable<I> {
+	/// Constructs a new peekable wrapper around `I`.
 	fn new(mut inner: I) -> Self {
 		let next = inner.next_byte();
 		Self { inner, next }
 	}
 
+	/// Reads ahead to the result of the next byte, if there is one, without appearing to advance
+	/// the I/O object.
 	fn peek(&self) -> Option<u8> {
 		match self.next {
 			Ok(Some(b)) => Some(b),

@@ -1,3 +1,5 @@
+//! Retokenise a text-format BASIC file.
+
 use std::num::NonZeroU8;
 use std::{fmt, mem};
 
@@ -13,6 +15,7 @@ use crate::{
 // chars that didn't match anything
 pub(super) type CharBuffer = ArrayVec<u8, { crate::keyword::MAX_LEN as usize }>;
 
+/// Core tokeniser.
 pub(super) struct TokenScanner {
 	char_buf: CharBuffer,
 	char_out_buf: CharBuffer,
@@ -24,8 +27,8 @@ pub(super) struct TokenScanner {
 
 static PINCH_ALL: &'static [TokenLookupEntry] = crate::token_data::LOOKUP_MAP.as_slice();
 
-// ELSE tokenises differently if we are in a multi-line IF
-// TODO: this *stacks*
+/// A (slightly hackish) way to handle that `ELSE` keywords tokenise differently when used in
+/// multi-line `IF` statements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(super) struct ElseHack {
 	stack: u32,
@@ -61,6 +64,7 @@ impl ElseHack {
 }
 
 impl TokenScanner {
+	/// Constructs a new token scanner.
 	pub fn new() -> Self {
 		Self {
 			char_buf: CharBuffer::new(),
@@ -72,10 +76,15 @@ impl TokenScanner {
 		}
 	}
 
+	/// Fetch any characters that have passed through the scanner.
+	///
+	/// You should always call this repeatedly until it returns `None` before calling
+	/// [`push`](Self::push).
 	pub fn try_pull(&mut self) -> Option<u8> {
 		self.char_out_buf.pop_front()
 	}
 
+	/// Pushes a new byte (a RISC OS Latin-1 char) into the scanner.
 	pub fn push(&mut self, ch: u8) {
 		macro_rules! set_lhs {
 			(char) => { self.is_lhs = ch == b':'; };
@@ -129,6 +138,10 @@ impl TokenScanner {
 		}
 	}
 
+	/// Flushes any remaining characters out of the scanner.
+	///
+	/// You should always call this, then [`try_pull`](Self::try_pull), when you have no more bytes
+	/// coming in from a line.
 	pub fn flush(&mut self) {
 		if let Some((kw, ti)) = self.best_match.take().filter(|(kw, _)|
 			kw.len().get() as usize == self.char_buf.len()

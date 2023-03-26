@@ -8,10 +8,16 @@ pub(crate) use per_line_bits::*;
 mod arrayvec_ext;
 pub(crate) use arrayvec_ext::ArrayVecExt;
 
+/// A thin trait to express [`IoObject`].
 pub trait Readable: io::Read + Debug {}
 impl<T: io::Read + Debug> Readable for T {}
+
+/// A convience alias for I/O dyn traits used throughout `basc`.
 pub type IoObject<'a> = &'a mut (dyn Readable + 'a);
 
+/// A trait for easily fetching data from an I/O source, one byte at a time.
+///
+/// It is automatically implemented on [`dyn io::Read`](io::Read);
 pub trait NextByte {
 	type Error;
 	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error>;
@@ -29,7 +35,7 @@ impl<'a, 'b> NextByte for &'a mut (dyn io::Read + 'b) {
 	type Error = io::Error;
 
 	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
-		next_byte_io_read(self)
+		next_byte_io_read(*self)
 	}
 }
 
