@@ -218,18 +218,19 @@ pub(crate) struct Iter<'a> {
 	pos: u8,
 }
 
-static EMPTY: RawKeyword = unsafe {
-	// SAFETY: this should match preconditions on RawKeyword::new_unchecked
-	RawKeyword::new_unchecked([
-		33, 0, 0,  0, 0, 0,  0, 0, 0, // chars
-		0, // flags
-		0, // reserved
-		1, // length (must be non-zero)
-	])
-};
-
 impl Iter<'static> {
+	/// Returns a keyword iterator that yields no characters when iterated.
 	pub(crate) fn empty() -> Self {
+		static EMPTY: RawKeyword = unsafe {
+			// SAFETY: this should match preconditions on RawKeyword::new_unchecked
+			RawKeyword::new_unchecked([
+				33, 0, 0,  0, 0, 0,  0, 0, 0, // chars
+				0, // flags
+				0, // reserved
+				1, // length (must be non-zero)
+			])
+		};
+
 		Self {
 			keyword: &EMPTY,
 			pos: 1,
