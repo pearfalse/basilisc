@@ -33,6 +33,10 @@ impl<'a> ByteDecoder<'a> {
 		// - ManuallyDrop ensures that the original vec doesn't get dropped immediately
 		// - using vec![] ensures the buffer is initialised
 		// - immediately converting to boxed slice ensures the buffer stays address-stable
+
+		// buffer capacity must be at least 4
+		let capacity = capacity.max(nonzero!(4usize));
+
 		let mut buf = ManuallyDrop::new(vec![0u8; capacity.get()].into_boxed_slice());
 		Self {
 			buf: std::ptr::slice_from_raw_parts_mut(
@@ -183,6 +187,13 @@ mod tests {
 	fn multi_iter_no_utf8_split() {
 		// split into multiple iterations
 		check(b"MULTIread", b"MULTIread", Some(3));
+	}
+
+	#[test]
+	fn stupidly_small_buffer() {
+		for size in 1..=3 {
+			check("fun\u{00a9}tion \u{1fbc0}".as_bytes(), b"fun\xa9tion \x84", Some(size));
+		}
 	}
 
 	#[test]
