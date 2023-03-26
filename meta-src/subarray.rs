@@ -1,9 +1,5 @@
 use std::{ops::Index, num::NonZeroUsize};
 
-pub mod traits {
-	pub use super::SubArrayFlat;
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubArray<'a, T> {
 	slice: &'a [T],
@@ -71,13 +67,8 @@ impl<'a, T> Iterator for FullIter<'a, T> {
 	}
 }
 
-
-pub trait SubArrayFlat<'a, T> {
-	fn get_flat(&'a self, index: usize) -> Option<&'a T>;
-}
-
-impl<'a, T> SubArrayFlat<'a, T> for SubArray<'a, Option<T>> {
-	fn get_flat(&'a self, index: usize) -> Option<&'a T> {
+impl<'a, T> SubArray<'a, Option<T>> {
+	pub fn get_flat(&'a self, index: usize) -> Option<&'a T> {
 		self.get(index).and_then(Option::as_ref)
 	}
 }
