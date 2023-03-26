@@ -32,7 +32,7 @@ pub(crate) struct RawKeyword {
 
 impl PartialEq for RawKeyword {
 	fn eq(&self, other: &Self) -> bool {
-		Self::eq_guts(self, other)
+		self.len == other.len && self.flags == other.flags && self.as_bytes() == other.as_bytes()
 	}
 }
 
@@ -117,10 +117,6 @@ impl RawKeyword {
 			// SAFETY: we don't safely allow construction of byte slices that don't fit
 			core::slice::from_raw_parts(start, self.len.get() as usize)
 		}
-	}
-
-	fn eq_guts(a: &Self, b: &Self) -> bool {
-		a.len == b.len && a.flags == b.flags && a.as_bytes() == b.as_bytes()
 	}
 
 	#[inline]
