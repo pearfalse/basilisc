@@ -15,8 +15,8 @@ use super::Error;
 
 #[derive(Debug)]
 pub(super) struct ByteDecoder<'a> {
-	buf: MaybeUninit<*mut [u8]>, // heap storage
-	drain: *const [u8], // pull off chars
+	buf: *mut [u8], // heap storage
+	drain: *const [u8], // pull off chars, same storage as `buf`
 	src: IoObject<'a>,
 	last_read_pos: u64,
 }
@@ -35,9 +35,8 @@ impl<'a> ByteDecoder<'a> {
 		// - immediately converting to boxed slice ensures the buffer stays address-stable
 		let mut buf = ManuallyDrop::new(vec![0u8; capacity.get()].into_boxed_slice());
 		Self {
-			buf: MaybeUninit::new(std::ptr::slice_from_raw_parts_mut(
-				buf.as_mut_ptr(), capacity.get()
-				)),
+			buf: std::ptr::slice_from_raw_parts_mut(
+				buf.as_mut_ptr(), capacity.get()),
 			drain: std::ptr::slice_from_raw_parts(buf.as_ptr(), 0),
 			src,
 			last_read_pos: 0,
@@ -104,10 +103,6 @@ impl<'a> ByteDecoder<'a> {
 	fn fill_buf(&mut self) -> io::Result<ControlFlow<()>> {
 		use std::ptr;
 
-		let entire_buf = unsafe {
-			// SAFETY: always init'd, no one else keeps a mut ref around for this
-			self.buf.assume_init_read()
-		};
 		let rem_len = self.drain_len();
 
 		let empty_buf = unsafe {
@@ -115,14 +110,14 @@ impl<'a> ByteDecoder<'a> {
 				// move undrained elements to the front and offset `entire_buf`
 				ptr::copy(
 					self.drain as *const u8,
-					entire_buf as *mut u8,
+					self.buf as *mut u8,
 					rem_len);
-				let space_len = (*entire_buf).len() - rem_len;
+				let space_len = (*self.buf).len() - rem_len;
 				ptr::slice_from_raw_parts_mut(
-					(entire_buf as *mut u8).add(rem_len),
+					(self.buf as *mut u8).add(rem_len),
 					space_len)
 			} else {
-				entire_buf
+				self.buf
 			}
 		};
 
@@ -138,7 +133,7 @@ impl<'a> ByteDecoder<'a> {
 			read_size
 		};
 
-		self.drain = std::ptr::slice_from_raw_parts(entire_buf as *const u8, read_size + rem_len);
+		self.drain = std::ptr::slice_from_raw_parts(self.buf as *const u8, read_size + rem_len);
 
 		Ok(match read_size {
 			0 => ControlFlow::Break(()),
@@ -158,8 +153,8 @@ impl<'a> ByteDecoder<'a> {
 impl<'a> Drop for ByteDecoder<'a> {
 	fn drop(&mut self) {
 		unsafe {
-			// SAFETY: `buf` is a boxed slice, put behind MaybeUninit to prevent mut aliasing
-			std::mem::drop(Box::from_raw(self.buf.assume_init_read()))
+			// SAFETY: `buf` was always a boxed slice, and we're not touching `self.drain` anymore
+			std::mem::drop(Box::from_raw(self.buf))
 		}
 	}
 }
