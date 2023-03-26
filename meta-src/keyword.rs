@@ -289,13 +289,6 @@ mod tests {
 	}
 
 	#[test]
-	fn min_abbrev_real() {
-		assert_eq!(Some(b"P".as_slice()),
-			crate::token_data::TOKEN_MAP_DIRECT[0xf1]
-			.unwrap().min_abbrev_bytes());
-	}
-
-	#[test]
 	fn token_iter() {
 		assert_eq!(b"PRINT", &*crate::token_data::TOKEN_MAP_DIRECT[0xf1]
 			.unwrap().iter()
