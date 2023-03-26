@@ -189,11 +189,6 @@ impl RawKeyword {
 	}
 
 	#[inline]
-	pub fn min_abbrev_bytes(&self) -> Option<&[u8]> {
-		self.min_abbrev().map(AsciiStr::as_bytes)
-	}
-
-	#[inline]
 	pub fn is_greedy(&self) -> bool {
 		self.flags & flags::GREEDY != 0
 	}
