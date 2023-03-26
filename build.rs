@@ -36,7 +36,7 @@ fn main() -> io::Result<()> {
 	// make the file
 	let mut gen_token_data = fs::File::create(out_dir.join("token_data.rs"))?;
 
-	write!(gen_token_data, r#"// auto-generated
+	write!(gen_token_data, r#"// auto-generated code starts here
 use core::num::NonZeroU8;
 
 use crate::{{
@@ -45,33 +45,46 @@ use crate::{{
 	token_iter::TokenIter,
 }};
 
+/// The core type of the lookup tables.
 type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 
 "#)?; // TODO: there's no reason to have these be RawKeywords, there's no fallible conversion here
 
 	// write arrays
 	macro_rules! write_array {
-		($var:ident) => {_write_array(&mut gen_token_data, &*$var, stringify!($var))};
+		($var:ident) => {
+			_write_array(&mut gen_token_data, &*$var, stringify!($var),
+				"/// Token data for the direct map.")
+		};
+		($var:ident, $ind_prefix:tt) => {
+			_write_array(&mut gen_token_data, &*$var, stringify!($var), concat!(
+				"/// Token data for the indirect map (prefix ",
+				stringify!($ind_prefix),
+				")."
+			))
+		}
 	}
 	write_array!(TOKEN_MAP_DIRECT)?;
-	write_array!(TOKEN_MAP_C6)?;
-	write_array!(TOKEN_MAP_C7)?;
-	write_array!(TOKEN_MAP_C8)?;
+	write_array!(TOKEN_MAP_C6, 0xc6)?;
+	write_array!(TOKEN_MAP_C7, 0xc7)?;
+	write_array!(TOKEN_MAP_C8, 0xc8)?;
 
-	writeln!(&mut gen_token_data,
-		"pub(crate) static LINE_DEPENDENT_KEYWORD_BYTES: [u8; 2] = [0x{:02x}, 0x{:02x}];\n",
+	writeln!(&mut gen_token_data, r#"
+/// The tokens for `GOTO` and `GOSUB` are written here, so that [the decoder](crate::unpack::Parser)
+/// knows when to expect an encoded line number reference.
+pub(crate) static LINE_DEPENDENT_KEYWORD_BYTES: [u8; 2] = [0x{:02x}, 0x{:02x}];
+"#,
 		token_goto, token_gosub)?;
 
-
-	// TODO write parsing map
 	write_parse_map(&mut gen_token_data)?;
 
 
 	gen_token_data.sync_all()?;
 	return Ok(());
 
-	fn _write_array(file: &mut fs::File, arr: &'static [Keyword], name: &'static str)
-	-> io::Result<()> {
+	fn _write_array(file: &mut fs::File, arr: &'static [Keyword], name: &'static str,
+		doc_string: &'static str,
+	) -> io::Result<()> {
 		fn reduce_front<T>(mut slice: &[Option<T>]) -> (&[Option<T>], usize) {
 			let mut from = 0usize;
 			while let Some((None, x)) = slice.split_first() {
@@ -96,6 +109,7 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 		let (flat_arr, from) = reduce_front(&mut flat_arr[..]);
 		let flat_arr = reduce_back(flat_arr);
 
+		writeln!(file, "{}", doc_string)?;
 		writeln!(file, "pub(crate) static {}: TokenDecodeMap = TokenDecodeMap::new(unsafe {{&[",
 			name)?;
 		writeln!(file, "\t// SAFETY: valid arrays were generated at build time")?;
@@ -137,11 +151,16 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 	list.sort_unstable();
 
 	writeln!(file, "pub(crate) type TokenLookupEntry = (RawKeyword, TokenIter);")?;
-	writeln!(file, "// SAFETY: values are generated from the same parsed type at build time")?;
-	writeln!(file,
-		"pub(crate) static LOOKUP_MAP: [TokenLookupEntry; {}] = unsafe {{[",
+	writeln!(file, r#"
+/// The lookup table used to convert an ASCII string of a keyword into its associated token data.
+///
+/// The map is an array of sorted keywords (see [`Keyword`][K] for the actual sorting rules).
+///
+/// [K]: crate::cooked_keyword::Keyword
+pub(crate) static LOOKUP_MAP: [TokenLookupEntry; {}] = unsafe {{["#,
 		list.len(),
 	)?;
+	writeln!(file, "// SAFETY: values are generated from the same parsed type at build time")?;
 
 	for (keyword, value) in list {
 		writeln!(file, "\t( // {}", keyword.keyword().as_str())?;
