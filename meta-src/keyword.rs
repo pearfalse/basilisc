@@ -169,20 +169,13 @@ impl RawKeyword {
 	/// - The keyword length in bytes (`n`) must be non-zero and set in `src[11]`;
 	/// - `src[9]` must not set any bits in `flags::RESERVED`;
 	/// - The minimum abbrev length in `src[9]` must be less than the string length or zero;
+	/// - `src[10]` is reserved and must be zero.
 	///
 	/// Violating any of the above conditions may (but is not guaranteed to) violate memory safety.
 	pub(crate) const unsafe fn new_unchecked(src: [u8; STORE_SIZE as usize]) -> Self {
 		let raw_len = src[STORE_SIZE as usize - 1];
 		debug_assert!(raw_len > 0 && raw_len <= MAX_LEN);
 		mem::transmute(src)
-	}
-
-	/// Returns a copy of the raw keyword store.
-	pub(crate) fn as_array(&self) -> RawKeyword {
-		unsafe {
-			// safety: RawKeyword has strictly looser invariants than Keyword
-			mem::transmute(self.clone())
-		}
 	}
 
 	/// Indicates whether this keyword only tokenises as an lvalue or rvalue.
@@ -306,9 +299,7 @@ mod tests {
 		pos: TokenPosition, greedy: bool,
 	) -> RawKeyword {
 		let kw = Keyword::try_new(byte, word, min_abbrev, pos, greedy).unwrap();
-		unsafe {
-			RawKeyword::new_unchecked(kw.as_array())
-		}
+		RawKeyword::from(kw)
 	}
 
 	#[test]

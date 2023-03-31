@@ -5,7 +5,7 @@ use std::num::NonZeroU8;
 
 use ascii::{AsciiStr, AsAsciiStr as _};
 
-use crate::keyword;
+use crate::keyword::{self, RawKeyword};
 
 
 /// An error in keyword construction, if any constraints are not met.
@@ -168,6 +168,16 @@ impl Ord for Keyword {
 			.then_with(|| abbr(self).cmp(&abbr(other)))
 	}
 }
+
+impl From<Keyword> for RawKeyword {
+	fn from(kw: Keyword) -> Self {
+		unsafe {
+			// SAFETY: invariants are handled by `Keyword::as_array`
+			Self::new_unchecked(kw.as_array())
+		}
+	}
+}
+
 
 #[cfg(test)]
 mod tests {
