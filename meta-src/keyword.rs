@@ -166,9 +166,9 @@ impl RawKeyword {
 	///
 	/// - The first `n` bytes of `src`, where `n` is the keyword length in bytes, must be printing
 	///   ASCII characters, excluding space;
-	/// - The `src[10]` must not set any bits in `flags::RESERVED`;
-	/// - The minimum abbrev length in `src[10]` must be less than the string length or zero;
-	/// - `src[11]` is reserved and must be zero.
+	/// - The keyword length in bytes (`n`) must be non-zero and set in `src[11]`;
+	/// - `src[9]` must not set any bits in `flags::RESERVED`;
+	/// - The minimum abbrev length in `src[9]` must be less than the string length or zero;
 	///
 	/// Violating any of the above conditions may (but is not guaranteed to) violate memory safety.
 	pub(crate) const unsafe fn new_unchecked(src: [u8; STORE_SIZE as usize]) -> Self {
