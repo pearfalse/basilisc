@@ -1,8 +1,17 @@
 [package]
-name = "basc"
+name = "bbc-basic-coverter"
 version = "0.2.0"
 edition = "2021"
 authors = ["Simon Harris <simon@pearfalse.com>"]
+
+[lib]
+name = "basc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "basc"
+path = "src/main.rs"
+test = false # all tests are in the library
 
 [dependencies]
 gumdrop = "0.8"

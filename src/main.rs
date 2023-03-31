@@ -6,22 +6,9 @@ use std::error::Error;
 
 use gumdrop::Options;
 
-mod support;
-mod token_data;
-mod line_numbers;
-mod latin1;
-mod unpack;
-mod pack;
-
+include!("mod-decls.rs");
 use pack::Error as PackError;
 use support::IoObject;
-
-// include meta-src files that we want
-#[path = "../meta-src/keyword.rs"] mod keyword;
-#[path = "../meta-src/token_iter.rs"] mod token_iter;
-#[path = "../meta-src/subarray.rs"] mod subarray;
-#[cfg(any(test, doc))]
-#[path = "../meta-src/cooked_keyword.rs"] mod cooked_keyword;
 
 
 #[derive(Debug, Options)]

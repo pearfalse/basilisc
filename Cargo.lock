@@ -21,7 +21,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc782823ed0b8133960a4525e1064b6c30473ca6554d00f697af2b5b520dc723"
 
 [[package]]
-name = "basc"
+name = "bbc-basic-coverter"
 version = "0.2.0"
 dependencies = [
  "arrayvec",
