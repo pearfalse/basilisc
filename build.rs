@@ -25,14 +25,6 @@ fn main() -> io::Result<()> {
 	let out_dir = std::env::var_os("OUT_DIR").unwrap();
 	let out_dir = Path::new(&out_dir);
 
-	// early-runtime data gen
-	let (token_goto, token_gosub) = {
-		fn _find_direct(key: &'static str) -> u8 {
-			TOKEN_MAP_DIRECT.iter().find(|kw| kw.keyword().as_str() == key).unwrap().byte().get()
-		}
-		(_find_direct("GOTO"), _find_direct("GOSUB"))
-	};
-
 	// make the file
 	let mut gen_token_data = fs::File::create(out_dir.join("token_data.rs"))?;
 
@@ -68,13 +60,6 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 	write_array!(TOKEN_MAP_C6, 0xc6)?;
 	write_array!(TOKEN_MAP_C7, 0xc7)?;
 	write_array!(TOKEN_MAP_C8, 0xc8)?;
-
-	writeln!(&mut gen_token_data, r#"
-/// The tokens for `GOTO` and `GOSUB` are written here, so that [the decoder](crate::unpack::Parser)
-/// knows when to expect an encoded line number reference.
-pub(crate) static LINE_DEPENDENT_KEYWORD_BYTES: [u8; 2] = [0x{:02x}, 0x{:02x}];
-"#,
-		token_goto, token_gosub)?;
 
 	write_parse_map(&mut gen_token_data)?;
 

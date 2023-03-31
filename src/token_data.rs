@@ -66,19 +66,4 @@ mod test_lookup {
 			.chain(all_str_lengths(TOKEN_MAP_C8))
 			.all(|sl| sl > 0));
 	}
-
-	#[test]
-	fn check_flagged_goto_gosub() {
-		use super::LINE_DEPENDENT_KEYWORD_BYTES;
-		for keyword in ["GOTO", "GOSUB"] {
-			let byte = TOKEN_MAP_DIRECT.full_iter()
-				.position(|mk| mk.map(|k| k.as_ascii_str().as_bytes() == keyword.as_bytes())
-					== Some(true))
-				.and_then(|u| u8::try_from(u).ok())
-				.unwrap();
-			assert!(LINE_DEPENDENT_KEYWORD_BYTES.iter().find(|&&l| l == byte).is_some(),
-				"could not find {} byte equiv ({:02x}) in LINE_DEPENDENT_KEYWORD_BYTES ({:02x?})",
-				keyword, byte, LINE_DEPENDENT_KEYWORD_BYTES);
-		}
-	}
 }

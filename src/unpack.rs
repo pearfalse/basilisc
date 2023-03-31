@@ -383,19 +383,6 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 	}
 }
 
-/// Minimal ergonomic extension methods for the byte primitive.
-trait U8Ext: core::cmp::Eq + core::cmp::PartialEq<u8> {
-	/// Returns `true` if the byte in `self` is the token for `GOTO` or `GOSUB`.
-	// TODO: can't we just look for 8d?
-	fn is_goto_or_gosub(&self) -> bool {
-		// impl assumes that LINE_DEPENDENT_KEYWORD_BYTES is 2 bytes wide
-		let [a, b] = token_data::LINE_DEPENDENT_KEYWORD_BYTES;
-		*self == a || *self == b
-	}
-}
-
-impl U8Ext for u8 {}
-
 
 /// A reimplementation of [std::iter::Peekable] for types that implement [`NextByte`].
 ///
