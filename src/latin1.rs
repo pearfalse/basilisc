@@ -45,9 +45,13 @@ static LATIN1_MAP: [char; 256] = [
 	'ð', 'ñ', 'ò', 'ó', 'ô', 'õ', 'ö', '÷', 'ø', 'ù', 'ú', 'û', 'ü', 'ý', 'þ', 'ÿ',
 ];
 
+mod private {
+	#[doc(hidden)] pub trait Sealed { }
+}
+
 /// Extensions to `char` for convenient conversion between RISC OS Latin-1 and approximate Unicode
 /// equivalents.
-pub(crate) trait CharExt {
+pub(crate) trait CharExt : private::Sealed {
 	/// Creates a character from a byte interpreted as RISC OS Latin-1.
 	fn from_risc_os_latin1(src: u8) -> Self;
 
@@ -55,6 +59,8 @@ pub(crate) trait CharExt {
 	#[allow(clippy::wrong_self_convention)] // this trait only applies to `char`, which is `Copy`
 	fn as_risc_os_latin1(self) -> Option<u8>;
 }
+
+impl private::Sealed for char { }
 
 impl CharExt for char {
 	#[inline]
