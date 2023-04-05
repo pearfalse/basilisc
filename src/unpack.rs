@@ -305,7 +305,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 
 		Ok(Some(Line::new(line_number, {
 			let mut will_box = Vec::with_capacity(self.buffer.len());
-			will_box.extend_from_slice(&*self.buffer);
+			will_box.extend_from_slice(&self.buffer);
 			will_box.into_boxed_slice()
 		})))
 	}
@@ -333,17 +333,17 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 					// if next byte is also a token char, or token, insert a space
 					// this undoes an optimisation by BASIC squashers that would destroy the
 					// program syntax on a plaintext roundtrip
-					self.inner.peek().map(|b| b >= 0x7f
-						|| (b'A'..=b'Z').contains(&b)
-						|| (b'a'..=b'z').contains(&b)) // TODO: check if this is right
-						.unwrap_or(false)
+					// TODO: check if this is right
+					self.inner.peek().map(|b| b >= 0x7f || b.is_ascii_alphabetic()) == Some(true)
 				} else { false };
 				self.cur_token = KeywordIter2::new(s.iter(), should_insert_space);
 			},
 			None => {
 				// no match
 				debug_assert!(self.byte_flush.is_empty());
-				byte_if_fail.map(|b| self.byte_flush.push(b));
+				if let Some(b) = byte_if_fail {
+					self.byte_flush.push(b);
+				}
 				self.byte_flush.push(next_byte);
 			}
 		};

@@ -25,7 +25,7 @@ pub(super) struct TokenScanner {
 	else_hack: ElseHack,
 }
 
-static PINCH_ALL: &'static [TokenLookupEntry] = crate::token_data::LOOKUP_MAP.as_slice();
+static PINCH_ALL: &[TokenLookupEntry] = crate::token_data::LOOKUP_MAP.as_slice();
 
 /// A (slightly hackish) way to handle that `ELSE` keywords tokenise differently when used in
 /// multi-line `IF` statements.
@@ -95,7 +95,7 @@ impl TokenScanner {
 			if let Some(char_buf_len) = NonZeroU8::new(self.char_buf.len() as u8) {
 				// (an empty char_buf wouldn't be useful)
 				debug_assert!(self.pinch.len() < PINCH_ALL.len());
-				let abbr_match = self.pinch.iter().find(|&&(ref kw, _)| {
+				let abbr_match = self.pinch.iter().find(|&(kw, _)| {
 					let min_abbrev_len = kw.min_abbrev_len();
 					min_abbrev_len.is_some() && min_abbrev_len <= Some(char_buf_len)
 				});
@@ -171,7 +171,7 @@ impl TokenScanner {
 	}
 
 	fn set_token_buf(&mut self, mut new: TokenIter) {
-		let first = new.clone().peek_first();
+		let first = new.peek_first();
 
 		// apply ELSE hack
 		match first {
@@ -201,7 +201,7 @@ impl TokenScanner {
 		// front byte first
 		while let Some((left, remain)) = self.pinch.split_first() {
 			let should_narrow_normal = left.0.as_ascii_str().as_bytes()
-				.get(pinch_idx as usize).map(|&b| b < ch) != Some(false);
+				.get(pinch_idx).map(|&b| b < ch) != Some(false);
 
 			// skip over RHS token if there is one
 			let should_narrow_lhs = self.is_lhs && left.0.position() == TokenPosition::Right;
@@ -220,7 +220,7 @@ impl TokenScanner {
 		// then back byte
 		while let Some((right, remain)) = self.pinch.split_last() {
 			if right.0.as_bytes()
-			.get(pinch_idx as usize).map(|&b| b > ch) == Some(true) {
+			.get(pinch_idx).map(|&b| b > ch) == Some(true) {
 				// too flabby on the right
 				self.pinch = remain;
 			} else {
@@ -277,7 +277,7 @@ impl TokenScanner {
 			// - nongreedy, but followed by something other than A-Z
 			let should_take = kw.is_greedy() || {
 				self.char_buf.get(kw.len().get() as usize)
-					.map(|c| !(b'A'..=b'Z').contains(c))
+					.map(|c| !c.is_ascii_uppercase())
 					.unwrap_or(true)
 			};
 			if should_take {
@@ -310,16 +310,14 @@ impl TokenScanner {
 	}
 
 	fn flush_char_buf(&mut self) {
-		self.char_out_buf.extend(mem::replace(
-			&mut self.char_buf, Default::default()
-			).into_iter());
+		self.char_out_buf.extend(mem::take(&mut self.char_buf).into_iter());
 	}
 
 	fn is_keyword_char(ch: u8) -> bool {
 		// it's variable validity that matters here; getting one of these with an empty pinch
 		// is *not* a case where we can reset the tokeniser
 		// @ is not included; @% is an edge case, but not one we need to worry about
-		matches!(ch, b'A'..=b'Z') || b"_$(".contains(&ch)
+		ch.is_ascii_uppercase() || b"_$(".contains(&ch)
 	}
 }
 
@@ -369,7 +367,7 @@ impl fmt::Debug for TokenScanner {
 		}
 
 		f.debug_struct("TokenScanner")
-			.field("char_buf", &HexArray(&*self.char_buf))
+			.field("char_buf", &HexArray(&self.char_buf))
 			.field("char_out_buf", &&*self.char_out_buf)
 			.field("best_match", &self.best_match)
 			.field("else_hack", &self.else_hack)

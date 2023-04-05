@@ -2,7 +2,7 @@
 //!
 //! See [ArrayVecExt] for more.
 
-use std::{mem::{ManuallyDrop, self, MaybeUninit}, ptr, slice};
+use std::{mem::{ManuallyDrop, self, MaybeUninit}, ptr};
 use arrayvec::ArrayVec;
 
 /// Extension trait for additional batch-removing methods needed on ArrayVec.
@@ -49,7 +49,7 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 		let must_drop = mem::needs_drop::<T>() && N > 0;
 
 		let old_len = self.len();
-		let new_len = old_len.checked_sub(x as usize)
+		let new_len = old_len.checked_sub(x)
 			.unwrap_or_else(|| panic!("couldn't remove {} items from a {}-wide ArrayVec",
 				x, old_len));
 
@@ -61,8 +61,7 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 			// copy items to here for dropping later
 			unsafe {
 				// we go through a raw slice to keep miri happy
-				let dst = slice::from_raw_parts_mut(drop_sites.as_mut_ptr(), x)
-					as *mut [MaybeUninit<T>] as *mut T;
+				let dst = ptr::slice_from_raw_parts_mut(drop_sites.as_mut_ptr(), x) as *mut T;
 				ptr::copy_nonoverlapping(self.as_ptr(), dst, x);
 			}
 		}

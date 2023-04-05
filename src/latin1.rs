@@ -52,6 +52,7 @@ pub(crate) trait CharExt {
 	fn from_risc_os_latin1(src: u8) -> Self;
 
 	/// Tries to encode the char as a RISC OS Latin-1 byte.
+	#[allow(clippy::wrong_self_convention)] // this trait only applies to `char`, which is `Copy`
 	fn as_risc_os_latin1(self) -> Option<u8>;
 }
 

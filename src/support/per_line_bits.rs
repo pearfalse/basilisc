@@ -38,7 +38,7 @@ impl PerLineBits {
 	/// Retrieves a mutable reference to a bit in the array.
 	///
 	/// Returns `None` if the index is outside the logical index range.
-	pub fn try_get_mut<'a>(&'a mut self, index: u16) -> Option<BitRefMut<'a>> {
+	pub fn try_get_mut(&mut self, index: u16) -> Option<BitRefMut<'_>> {
 		let (byte_idx, bit_mask) = Self::decompose(index);
 		self.store.get_mut(byte_idx as usize).map(|rm| BitRefMut {
 			r#ref: rm,
@@ -61,7 +61,7 @@ impl PerLineBits {
 	/// # Panics
 	///
 	/// This function will panic if the index is out of range.
-	pub fn get_mut<'a>(&'a mut self, index: u16) -> BitRefMut<'a> {
+	pub fn get_mut(&mut self, index: u16) -> BitRefMut<'_> {
 		self.try_get_mut(index).expect("index out of range")
 	}
 

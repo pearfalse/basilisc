@@ -137,10 +137,10 @@ fn main() {
 		(process, iter.collect::<Vec<_>>())
 	};
 	if matches!(*args_str, [ref s] if s.is_help()) {
-		Command::print_usage_and_exit(&*process, None);
+		Command::print_usage_and_exit(&process, None);
 	}
-	let args = match Command::parse_args_default(&*args_str) {
-		Ok(a) if a.user_wants_help() => Command::print_usage_and_exit(&*process, a.command_name()),
+	let args = match Command::parse_args_default(&args_str) {
+		Ok(a) if a.user_wants_help() => Command::print_usage_and_exit(&process, a.command_name()),
 		Ok(a) => a,
 		Err(e) => {
 			eprintln!("argument error: {}", e);
@@ -256,7 +256,7 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 				.as_bytes()
 				)?;
 		}
-		writeln!(output, "")?;
+		writeln!(output)?;
 	}
 
 	output.flush()?;

@@ -107,7 +107,7 @@ impl Line {
 		let line_number = self.line_number.to_be_bytes();
 		let header = [0x0d, line_number[0], line_number[1], hdr_len];
 		target.write_all(&header)?;
-		target.write_all(&*self.contents)
+		target.write_all(&self.contents)
 	}
 }
 
@@ -207,7 +207,7 @@ impl<'a> Parser<'a> {
 						let new = ((*stage) as u32) * 10 + (byte - b'0') as u32;
 						*stage = u16::try_from(new).ok()
 							.filter(|&ln| ln < LINE_NUMBER_CAP)
-							.ok_or_else(|| Error::LineNumberOutOfRange { found: new })?;
+							.ok_or(Error::LineNumberOutOfRange { found: new })?;
 					},
 					other => {
 						state = LineParser::InLineBody { line_number: Some(*stage) };
@@ -235,9 +235,10 @@ impl<'a> Parser<'a> {
 		self.token_scan.flush();
 		let mut flushed_bytes = token_scan::CharBuffer::new();
 		while let Some(b) = self.token_scan.try_pull() {
-					flushed_bytes.push(b);
-				}
-		self.try_add_bytes(&*flushed_bytes)?;
+			flushed_bytes.push(b);
+		}
+		self.try_add_bytes(&flushed_bytes)?;
+
 		Ok(())
 	}
 
@@ -254,13 +255,13 @@ impl<'a> Parser<'a> {
 	}
 
 	fn into_lines(mut self) -> Result<Vec<Line>> {
-		for gap in FindGaps::within(&mut *self.lines).collect::<Vec<Gap>>() {
+		for gap in FindGaps::within(&mut self.lines).collect::<Vec<Gap>>() {
 			let to_apply = infer_line_number_range(gap.before, gap.after,
 				gap.lines.len().try_into().unwrap())?;
+
 			for (ln, target) in to_apply.zip(gap.lines.iter_mut()) {
 				target.line_number = Some(ln);
 			}
-
 		}
 
 		Ok(self.lines.into_iter().enumerate().map(|(idx, ul)| {
@@ -288,9 +289,10 @@ impl<'a> Parser<'a> {
 		let error = {
 			let add_len: u16 = bytes.len().try_into().expect("can't add over 65K bytes!");
 			let old_buf_len = self.buf.len() as u16;
+
 			move || Error::LineTooLong {
 				length: match old_buf_len.saturating_add(add_len) {
-					fits if fits <= u16::MAX => fits, // ???
+					fits if fits < u16::MAX => fits, // ???
 					too_big => panic!("tried to create line length {}, which is impossibly large",
 						too_big),
 				},

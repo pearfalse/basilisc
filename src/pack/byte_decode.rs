@@ -1,3 +1,4 @@
+#![allow(clippy::unusual_byte_groupings)]
 //! Encoding conversion in I/O objects.
 
 use std::{
@@ -61,10 +62,7 @@ impl<'a> ByteDecoder<'a> {
 	/// Reads the next encoding-mapped byte from the source.
 	pub fn read_next(&mut self) -> Result<Option<u8>, Error> {
 		let ch: char = loop {
-			match self.try_next_char()? {
-				Some(c) => break c, // found a char
-				None => {}, // multi-byte char splits at end of buffer, or buffer ends
-			};
+			if let Some(c) = self.try_next_char()? { break c; } // found a char
 
 			match self.fill_buf()? {
 				ControlFlow::Break(()) if self.drain_len() == 0

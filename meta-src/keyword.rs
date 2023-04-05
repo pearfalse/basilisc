@@ -215,7 +215,7 @@ impl RawKeyword {
 	}
 
 	/// Iterates over the contents of the keyword.
-	pub(crate) fn iter<'a>(&'a self) -> Iter<'a> {
+	pub(crate) fn iter(&self) -> Iter<'_> {
 		Iter::new(self)
 	}
 }

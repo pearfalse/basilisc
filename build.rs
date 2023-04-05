@@ -91,7 +91,7 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 			flat_arr[kw.byte().get() as usize] = Some(kw);
 		}
 
-		let (flat_arr, from) = reduce_front(&mut flat_arr[..]);
+		let (flat_arr, from) = reduce_front(&flat_arr[..]);
 		let flat_arr = reduce_back(flat_arr);
 
 		writeln!(file, "{}", doc_string)?;
@@ -117,10 +117,10 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 		+ TOKEN_MAP_C6.len() + TOKEN_MAP_C7.len() + TOKEN_MAP_C8.len());
 
 	let baked_prefix: [(&'static [Keyword], _); 4] = [
-		(&*TOKEN_MAP_DIRECT, None),
-		(&*TOKEN_MAP_C6, NonZeroU8::new(0xc6)),
-		(&*TOKEN_MAP_C7, NonZeroU8::new(0xc7)),
-		(&*TOKEN_MAP_C8, NonZeroU8::new(0xc8)),
+		(*TOKEN_MAP_DIRECT, None),
+		(*TOKEN_MAP_C6, NonZeroU8::new(0xc6)),
+		(*TOKEN_MAP_C7, NonZeroU8::new(0xc7)),
+		(*TOKEN_MAP_C8, NonZeroU8::new(0xc8)),
 	];
 
 	for (map, prefix) in baked_prefix {
