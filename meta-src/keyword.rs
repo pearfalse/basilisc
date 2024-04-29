@@ -170,8 +170,6 @@ impl RawKeyword {
 	/// - `src[9]` must not set any bits in `flags::RESERVED`;
 	/// - The minimum abbrev length in `src[9]` must be less than the string length or zero;
 	/// - `src[10]` is reserved and must be zero.
-	///
-	/// Violating any of the above conditions may (but is not guaranteed to) violate memory safety.
 	pub(crate) const unsafe fn new_unchecked(src: [u8; STORE_SIZE as usize]) -> Self {
 		let raw_len = src[STORE_SIZE as usize - 1];
 		debug_assert!(raw_len > 0 && raw_len <= MAX_LEN);
