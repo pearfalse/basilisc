@@ -1,4 +1,4 @@
-//! All compiled data `basc` knows about BASIC keywords.
+//! All compiled data `basilisc` knows about BASIC keywords.
 //!
 //! Most of the interesting data is generated from a high-level representation in `build.rs`.
 

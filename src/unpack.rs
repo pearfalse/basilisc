@@ -31,7 +31,7 @@ impl Line {
 }
 
 
-/// Contains all errors that `basc` could encounter when unpacking a file.
+/// Contains all errors that `basilisc` could encounter when unpacking a file.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum UnpackError {
 	/// The input file ended mid-line, or without seeing the designated EOF marker
@@ -621,7 +621,7 @@ mod test_parser {
 		// - BASIC rejects the line outright ("Syntax error")
 		// - !Edit skips over the invalid token
 		// - !Zap prints the invalid token as its raw Latin-1 bytes
-		// We choose the 'preserve as-is' option here, given that basc-unpack's priority is
+		// We choose the 'preserve as-is' option here, given that unpack's priority is
 		//  round-trip preservation.
 		expand(0, b"\xc7\xc6PRINT", &[13,0,0,7, 0xc7, 0xc6, 0xf1]);
 	}
@@ -725,7 +725,7 @@ mod test_parser {
 
 		Ideally, we would find such situations and insert a space between them to keep the
 		syntactic meaning intact on repacking, even if the byte-for-byte comparison no longer holds
-		(and `basc` is not a BASIC squasher, so removing said spaces can remain out of scope).
+		(and `basilisc` is not a BASIC squasher, so removing said spaces can remain out of scope).
 		*/
 		expand(10, b"FALSE THEN", b"\r\0\x0a\x06\xa3\x8c");
 

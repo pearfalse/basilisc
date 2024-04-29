@@ -16,8 +16,8 @@ pub(crate) struct KeywordCtorError(&'static str);
 
 
 /// Represents a BASIC keyword at a high level. `build.rs` uses this to hold its own representation
-/// of all BASIC keywords `basc` needs to know about, and uses it to construct the
-/// [`RawKeyword`](keyword::RawKeyword) arrays that `basc` will refer to at runtime.
+/// of all BASIC keywords `basilisc` needs to know about, and uses it to construct the
+/// [`RawKeyword`](keyword::RawKeyword) arrays that `basilisc` will refer to at runtime.
 ///
 /// A keyword's data is:
 ///
@@ -54,7 +54,7 @@ impl Keyword {
 	/// - The keyword must be between 1 and 9 characters in length.
 	/// - If `min_abbrev` is populated, it must be between 1 and 7.
 	///
-	/// [^1]: `basc`'s tokeniser has more stringent requirements than this; this is just a small
+	/// [^1]: `basilisc`'s tokeniser has more stringent requirements than this; this is just a small
 	/// step above what is required for memory safety.
 	pub fn try_new(
 		byte: u8,

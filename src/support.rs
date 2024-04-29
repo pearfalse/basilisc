@@ -12,7 +12,7 @@ pub(crate) use arrayvec_ext::ArrayVecExt;
 pub trait Readable: io::Read + Debug {}
 impl<T: io::Read + Debug> Readable for T {}
 
-/// A convience alias for I/O dyn traits used throughout `basc`.
+/// A convience alias for I/O dyn traits used throughout `basilisc`.
 pub type IoObject<'a> = &'a mut (dyn Readable + 'a);
 
 /// A trait for easily fetching data from an I/O source, one byte at a time.

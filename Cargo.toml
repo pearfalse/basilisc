@@ -1,15 +1,15 @@
 [package]
-name = "bbc-basic-coverter"
+name = "basilisc"
 version = "0.2.0"
 edition = "2021"
 authors = ["Simon Harris <simon@pearfalse.com>"]
 
 [lib]
-name = "basc"
+name = "basilisc"
 path = "src/lib.rs"
 
 [[bin]]
-name = "basc"
+name = "basilisc"
 path = "src/main.rs"
 test = false # all tests are in the library
 

@@ -503,7 +503,7 @@ static INFERENCE_ALIGNMENT_TRIES: [(u16, NonZeroU16); 4] = [
 /// Infers line numbers for a block of unnumbered lines.
 ///
 /// This algorithm can fail if there is no room to add a unique number to every line requested;
-/// `basc` does not renumber a program.
+/// `basilisc` does not renumber a program.
 fn infer_line_number_range(line_before: Option<u16>, line_after: Option<u16>, num_lines: u16)
 -> Result<Range> {
 	// we can flatten line_after immediately, but line_before has to wait

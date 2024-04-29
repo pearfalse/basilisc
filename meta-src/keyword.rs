@@ -1,4 +1,4 @@
-//! (Raw) Keywords as used by `basc`, in its own serialised form.
+//! (Raw) Keywords as used by `basilisc`, in its own serialised form.
 #![allow(dead_code)] // neither build.rs nor bin crate will ever use 100% of methods here
 
 use std::{fmt, num::NonZeroU8, mem};
