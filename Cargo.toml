@@ -1,26 +1,34 @@
-[package]
-name = "basilisc"
-version = "0.2.0"
+[workspace]
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.3.0"
 edition = "2021"
 authors = ["Simon Harris <simon@pearfalse.com>"]
 
-[lib]
-name = "basilisc"
-path = "src/lib.rs"
-
-[[bin]]
-name = "basilisc"
-path = "src/main.rs"
-test = false # all tests are in the library
-
-[dependencies]
-gumdrop = "0.8"
+[workspace.dependencies]
 ascii = "1.0"
 arrayvec = "0.7"
 thiserror = "1.0"
 static_assertions = "1.1"
 nonzero_ext = "0.3"
 sptr = ">= 0.3"
+
+[package]
+name = "basilisc"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+ascii = { workspace = true }
+arrayvec = { workspace = true }
+thiserror = { workspace = true }
+static_assertions = { workspace = true }
+nonzero_ext = { workspace = true }
+sptr = { workspace = true }
+
+gumdrop = "0.8"
 
 [profile.release]
 lto = true
