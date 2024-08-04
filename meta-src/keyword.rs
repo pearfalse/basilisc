@@ -20,8 +20,7 @@ pub const STORE_SIZE: u8 = 12;
 /// `Option<RawKeyword>` is statically guaranteed to have the same type size as its unwrapped
 /// variant.
 #[derive(Clone, Copy)]
-#[repr(C)]
-#[repr(align(4))]
+#[repr(C, align(4))]
 pub(crate) struct RawKeyword {
 	/// Actual meaningful characters
 	chars: [u8; MAX_LEN as usize],
@@ -31,15 +30,17 @@ pub(crate) struct RawKeyword {
 	/// - b6 to b4: unused, must be 0
 	/// - b3 to b0: minimum abbreviation length (if 0, no abbrev)
 	flags: u8,
-	/// Unused
-	_reserved: u8,
-	/// Length of string (number of meaningful bytes in `chars`)
-	len: NonZeroU8,
+	/// Token byte in its namespace.
+	token_byte: NonZeroU8,
+	/// Length of string (number of meaningful bytes in `chars`) and prefix
+	len_and_prefix: NonZeroU8,
 }
 
 impl PartialEq for RawKeyword {
 	fn eq(&self, other: &Self) -> bool {
-		self.len == other.len && self.flags == other.flags && self.as_bytes() == other.as_bytes()
+		self.len_and_prefix == other.len_and_prefix
+			&& self.flags == other.flags
+			&& self.as_bytes() == other.as_bytes()
 	}
 }
 
@@ -94,6 +95,21 @@ pub(crate) mod flags {
 	pub const RESERVED: u8 = !(LVALUE_ONLY | RVALUE_ONLY | GREEDY | MIN_ABBREV_LEN_MASK);
 }
 
+/// Implementation detail for top bits in `RawKeyword::len_and_prefix`.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Prefix {
+	Direct = 0,
+	C6 = 0x40,
+	C7 = 0x80,
+	C8 = 0xc0,
+}
+
+impl Prefix {
+	const LOWER_BITS: u8 = 0b11_1111;
+}
+
+
 /// Different positions a keyword has to be in to tokenise a particular way. Most tokens will use
 /// [TokenPosition::Any].
 ///
@@ -106,12 +122,7 @@ pub(crate) enum TokenPosition {
 	Right = 1,
 }
 
-#[allow(dead_code)]
-#[doc(hidden)]
-/// These types must all have the same size.
-fn _assert_struct_size() {
-	static_assertions::assert_eq_size!([u8; STORE_SIZE as usize], RawKeyword, Option<RawKeyword>);
-}
+static_assertions::assert_eq_size!([u8; STORE_SIZE as usize], RawKeyword, Option<RawKeyword>);
 
 impl fmt::Debug for RawKeyword {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -139,13 +150,18 @@ impl RawKeyword {
 		let start: *const u8 = self.chars.as_ptr();
 		unsafe {
 			// SAFETY: we don't safely allow construction of byte slices that don't fit
-			core::slice::from_raw_parts(start, self.len.get() as usize)
+			core::slice::from_raw_parts(start, self.len().get() as usize)
 		}
 	}
 
 	#[inline]
 	/// Returns the length of this keyword.
-	pub(crate) fn len(&self) -> NonZeroU8 { self.len }
+	pub(crate) fn len(&self) -> NonZeroU8 {
+		unsafe {
+			// SAFETY: `len_and_prefix` is known to be non-zero in the lowest 6 bits
+			NonZeroU8::new_unchecked(self.len_and_prefix.get() & Prefix::LOWER_BITS)
+		}
+	}
 
 	/// Returns the keyword as an ASCII string slice.
 	///
@@ -166,12 +182,12 @@ impl RawKeyword {
 	///
 	/// - The first `n` bytes of `src`, where `n` is the keyword length in bytes, must be printing
 	///   ASCII characters, excluding space;
-	/// - The keyword length in bytes (`n`) must be non-zero and set in `src[11]`;
+	/// - The keyword length in bytes (`n`) must be non-zero and set in `src[11]`, OR-ed with
+	///   the u8 cast of the appropriate `Prefix` value;
 	/// - `src[9]` must not set any bits in `flags::RESERVED`;
-	/// - The minimum abbrev length in `src[9]` must be less than the string length or zero;
-	/// - `src[10]` is reserved and must be zero.
+	/// - The minimum abbrev length in `src[9]` must be less than the string length or zero.
 	pub(crate) const unsafe fn new_unchecked(src: [u8; STORE_SIZE as usize]) -> Self {
-		let raw_len = src[STORE_SIZE as usize - 1];
+		let raw_len = src[STORE_SIZE as usize - 1] & Prefix::LOWER_BITS;
 		debug_assert!(raw_len > 0 && raw_len <= MAX_LEN);
 		mem::transmute(src)
 	}
@@ -246,8 +262,8 @@ impl Iter<'static> {
 			RawKeyword::new_unchecked([
 				33, 0, 0,  0, 0, 0,  0, 0, 0, // chars
 				0, // flags
-				0, // reserved
-				1, // length (must be non-zero)
+				0xff, // byte value
+				1, // length (must be non-zero) | prefix
 			])
 		};
 
@@ -273,7 +289,7 @@ impl<'a> Iterator for Iter<'a> {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		let next_byte = match self.pos {
-			end @ 0 | end if end >= self.keyword.len.get() => None,
+			end @ 0 | end if end >= self.keyword.len().get() => None,
 			good => Some(good),
 		}.and_then(|idx| self.keyword.chars.get(idx as usize));
 
@@ -294,15 +310,15 @@ mod tests {
 
 	fn uncook(
 		byte: u8, word: &'static str, min_abbrev: Option<NonZeroU8>,
-		pos: TokenPosition, greedy: bool,
+		pos: TokenPosition, greedy: bool, prefix: Prefix
 	) -> RawKeyword {
-		let kw = Keyword::try_new(byte, word, min_abbrev, pos, greedy).unwrap();
+		let kw = Keyword::try_new(byte, word, min_abbrev, pos, greedy, prefix).unwrap();
 		RawKeyword::from(kw)
 	}
 
 	#[test]
 	fn min_abbrev() {
-		let kw = uncook(0x80, "LONG", NonZeroU8::new(2), TokenPosition::Any, false);
+		let kw = uncook(0x80, "LONG", NonZeroU8::new(2), TokenPosition::Any, false, Prefix::Direct);
 
 		assert_eq!(Some(AsciiStr::from_ascii(b"LO").unwrap()), kw.min_abbrev());
 	}

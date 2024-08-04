@@ -5,7 +5,8 @@ use std::num::NonZeroU8;
 
 use ascii::{AsciiStr, AsAsciiStr as _};
 
-use crate::keyword::{self, RawKeyword};
+use crate::token_iter::TokenIter;
+use crate::keyword::{self, Prefix, RawKeyword, TokenPosition};
 
 
 /// An error in keyword construction, if any constraints are not met.
@@ -43,8 +44,9 @@ pub(crate) struct Keyword {
 	byte: NonZeroU8,
 	keyword: &'static AsciiStr,
 	min_abbrev: Option<NonZeroU8>,
-	position: keyword::TokenPosition,
+	position: TokenPosition,
 	greedy: bool,
+	prefix: Prefix,
 }
 
 impl Keyword {
@@ -60,8 +62,9 @@ impl Keyword {
 		byte: u8,
 		keyword: &'static str,
 		min_abbrev: Option<NonZeroU8>,
-		position: keyword::TokenPosition,
+		position: TokenPosition,
 		greedy: bool,
+		prefix: Prefix,
 	) -> Result<Self, KeywordCtorError> {
 		// byte must be high
 		if ! (0x7f..=0xff).contains(&byte) {
@@ -89,18 +92,24 @@ impl Keyword {
 
 		let keyword = unsafe { keyword.as_ascii_str_unchecked() };
 		Ok(Self {
-			byte, keyword, position, min_abbrev, greedy
+			byte, keyword, position, min_abbrev, greedy, prefix
 		})
 	}
 
-	/// Returns the keyword as the packed array format that [RawKeyword](keyword::RawKeyword) uses
+	/// Returns the keyword as the packed array format that [RawKeyword] uses
 	/// internally.
 	pub fn as_array(&self) -> [u8; keyword::STORE_SIZE as usize] {
 		const S: usize = keyword::STORE_SIZE as usize;
 		let mut store = [0u8; S];
 		store[0..self.keyword.len()].copy_from_slice(self.keyword.as_bytes());
-		store[S - 1] = self.keyword.len() as u8;
-		// S - 2 is iteration statel keep at 0
+
+		// S - 1 := length | prefix bits
+		store[S - 1] = self.keyword.len() as u8 | self.prefix as u8;
+
+		// S - 2 := unprefixed byte
+		store[S - 2] = self.byte.get();
+
+		// S - 3 := flags
 		let flags = &mut store[S - 3];
 		if let Some(abbr) = self.min_abbrev {
 			debug_assert!(abbr.get() <= 7);
@@ -144,7 +153,7 @@ impl Keyword {
     /// Gets the position dependency for this keyword.
     #[inline(always)]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn position(&self) -> keyword::TokenPosition {
+    pub(crate) fn position(&self) -> TokenPosition {
         self.position
     }
 }
@@ -173,6 +182,7 @@ impl From<Keyword> for RawKeyword {
 	fn from(kw: Keyword) -> Self {
 		unsafe {
 			// SAFETY: invariants are handled by `Keyword::as_array`
+			// array already contains prefix bits, so OR in nothing additional
 			Self::new_unchecked(kw.as_array())
 		}
 	}
@@ -187,7 +197,7 @@ mod tests {
 	#[test]
 	fn byte() {
 		for b in [0x98, 0xca, 0xff, 0x7f, 0xbdu8] {
-			let k = Keyword::try_new(b, "WORD", None, TokenPosition::Any, false)
+			let k = Keyword::try_new(b, "WORD", None, TokenPosition::Any, false, Prefix::Direct)
 				.unwrap();
 			assert_eq!(b, k.byte().get());
 		}
@@ -195,16 +205,16 @@ mod tests {
 
 	#[test]
 	fn as_ascii_str() {
-		let k = Keyword::try_new(255, "ASCIIstr", None, keyword::TokenPosition::Any, false)
+		let k = Keyword::try_new(255, "ASCIIstr", None, keyword::TokenPosition::Any, false, Prefix::Direct)
 			.unwrap();
 		assert_eq!(AsciiStr::from_ascii(b"ASCIIstr").unwrap(), k.keyword());
 	}
 
 	#[test]
 	fn as_array() {
-		let k = Keyword::try_new(255, "ABCDEFGHI", None, keyword::TokenPosition::Any, false)
+		let k = Keyword::try_new(255, "ABCDEFGHI", None, keyword::TokenPosition::Any, false, Prefix::Direct)
 			.unwrap();
-		assert_eq!([65,66,67,68,69,70,71,72,73,0,0,9], k.as_array());
+		assert_eq!([65,66,67,68,69,70,71,72,73,0,255,9], k.as_array());
 	}
 
 	#[test]
@@ -217,7 +227,7 @@ mod tests {
 		] {
 			for abbrev_len in 0u8..(KEYWORD.len() as u8 - 1) {
 				let abbrev_len = NonZeroU8::new(abbrev_len);
-				let kw = Keyword::try_new(255, KEYWORD, abbrev_len, pos, false)
+				let kw = Keyword::try_new(255, KEYWORD, abbrev_len, pos, false, Prefix::Direct)
 					.unwrap();
 				assert_eq!(pos, kw.position());
 				assert_eq!(abbrev_len, kw.min_abbrev());
@@ -227,20 +237,20 @@ mod tests {
 
 	#[test]
 	fn fail_too_long() {
-		let _ = Keyword::try_new(155, "ASCIIstr??", None, TokenPosition::Any, false)
+		let _ = Keyword::try_new(155, "ASCIIstr??", None, TokenPosition::Any, false, Prefix::Direct)
 			.unwrap_err();
 	}
 
 	#[test]
 	fn fail_not_ascii() {
-		let _ = Keyword::try_new(155, "1234\u{4e94}", None, TokenPosition::Any, false)
+		let _ = Keyword::try_new(155, "1234\u{4e94}", None, TokenPosition::Any, false, Prefix::Direct)
 			.unwrap_err();
 	}
 
 	#[test]
 	#[allow(non_snake_case)]
 	fn fail_C0() {
-		let _ = Keyword::try_new(155, "keywo\rd", None, TokenPosition::Any, false)
+		let _ = Keyword::try_new(155, "keywo\rd", None, TokenPosition::Any, false, Prefix::Direct)
 			.unwrap_err();
 	}
 }

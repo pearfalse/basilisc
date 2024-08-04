@@ -1,6 +1,6 @@
 //! Container module for [`SubArray`] and related types.
 
-use std::{ops::Index, num::NonZeroUsize};
+use std::{num::NonZeroUsize, ops::Index};
 
 /// A slice wrapper that abstracts a slice where the first few elements are logically missing.
 ///
@@ -33,8 +33,8 @@ impl<'a, T> SubArray<'a, T> {
 	/// Gets the raw slice within the subarray.
 	///
 	/// This method is only used in unit tests to help with iterating all populated values.
-	#[cfg(any(test, doc))]
-	pub fn raw_slice(&self) -> &'a [T] {
+	#[cfg(test)]
+	pub(crate) fn raw_slice(&self) -> &'a [T] {
 		self.slice
 	}
 }

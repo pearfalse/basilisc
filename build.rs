@@ -13,7 +13,7 @@ mod meta_src {
 
 	pub(super) mod cooked_keyword;
 }
-use meta_src::{keyword, cooked_keyword::Keyword, token_iter::{self, TokenIter}};
+use meta_src::{keyword::{self, Prefix}, cooked_keyword::Keyword, token_iter::{self, TokenIter}};
 
 #[allow(dead_code)]
 fn dead_code_build_rs_exemptions() {
@@ -46,20 +46,23 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 	macro_rules! write_array {
 		($var:ident) => {
 			_write_array(&mut gen_token_data, &*$var, stringify!($var),
+				Prefix::Direct,
 				"/// Token data for the direct map.")
 		};
-		($var:ident, $ind_prefix:tt) => {
-			_write_array(&mut gen_token_data, &*$var, stringify!($var), concat!(
-				"/// Token data for the indirect map (prefix ",
-				stringify!($ind_prefix),
-				")."
-			))
+		($var:ident, $prefix_enum:expr, $ind_prefix:literal) => {
+			_write_array(&mut gen_token_data, &*$var, stringify!($var),
+				$prefix_enum,
+				concat!("/// Token data for the indirect map (prefix ",
+					stringify!($ind_prefix),
+					")."
+				)
+			)
 		}
 	}
 	write_array!(TOKEN_MAP_DIRECT)?;
-	write_array!(TOKEN_MAP_C6, 0xc6)?;
-	write_array!(TOKEN_MAP_C7, 0xc7)?;
-	write_array!(TOKEN_MAP_C8, 0xc8)?;
+	write_array!(TOKEN_MAP_C6, Prefix::C6, 0xc6)?;
+	write_array!(TOKEN_MAP_C7, Prefix::C7, 0xc7)?;
+	write_array!(TOKEN_MAP_C8, Prefix::C8, 0xc8)?;
 
 	write_parse_map(&mut gen_token_data)?;
 
@@ -68,6 +71,7 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 	return Ok(());
 
 	fn _write_array(file: &mut fs::File, arr: &'static [Keyword], name: &'static str,
+		prefix: Prefix,
 		doc_string: &'static str,
 	) -> io::Result<()> {
 		fn reduce_front<T>(mut slice: &[Option<T>]) -> (&[Option<T>], usize) {
@@ -116,17 +120,17 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 	= Vec::with_capacity(TOKEN_MAP_DIRECT.len()
 		+ TOKEN_MAP_C6.len() + TOKEN_MAP_C7.len() + TOKEN_MAP_C8.len());
 
-	let baked_prefix: [(&'static [Keyword], _); 4] = [
-		(*TOKEN_MAP_DIRECT, None),
-		(*TOKEN_MAP_C6, NonZeroU8::new(0xc6)),
-		(*TOKEN_MAP_C7, NonZeroU8::new(0xc7)),
-		(*TOKEN_MAP_C8, NonZeroU8::new(0xc8)),
+	let baked_prefix: [(&'static [Keyword], Option<(NonZeroU8, Prefix)>); 4] = [
+		(&TOKEN_MAP_DIRECT, None),
+		(&TOKEN_MAP_C6, Some((NonZeroU8::new(0xc6).unwrap(), Prefix::C6))),
+		(&TOKEN_MAP_C7, Some((NonZeroU8::new(0xc7).unwrap(), Prefix::C7))),
+		(&TOKEN_MAP_C8, Some((NonZeroU8::new(0xc8).unwrap(), Prefix::C8))),
 	];
 
 	for (map, prefix) in baked_prefix {
 		for kw in map {
-			list.push((kw, if let Some(prefix) = prefix {
-				TokenIter::new_indirect(prefix, kw.byte())
+			list.push((kw, if let Some((byte, _)) = prefix {
+				TokenIter::new_indirect(byte, kw.byte())
 			} else {
 				TokenIter::new_direct(kw.byte())
 			}));
@@ -164,26 +168,29 @@ macro_rules! _token_greedy {
 }
 
 macro_rules! _token_impl {
-	($byte:literal, $word:literal, $abbr:expr, $pos:ident, $greedy:expr) => {
+	($prefix:ident, $byte:literal, $word:literal, $abbr:expr, $pos:ident, $greedy:expr) => {
 		$crate::meta_src::cooked_keyword::Keyword::try_new($byte, $word,
 			$abbr,
 			$crate::meta_src::keyword::TokenPosition::$pos,
-			$greedy)
+			$greedy,
+			$crate::meta_src::keyword::Prefix::$prefix)
 		.unwrap()
 	}
 }
 
 macro_rules! _token_once {
-	(($byte:expr, $word:literal, nongreedy))
+	($prefix:ident, ($byte:expr, $word:literal, nongreedy))
 	=> {_token_impl!(
+		$prefix,
 		$byte,
 		$word,
 		None,
 		Any,
 		false
 	)};
-	(($byte:expr, $word:literal, abbr $abbr:literal, nongreedy))
+	($prefix:ident, ($byte:expr, $word:literal, abbr $abbr:literal, nongreedy))
 	=> {_token_impl!(
+		$prefix,
 		$byte,
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
@@ -191,24 +198,27 @@ macro_rules! _token_once {
 		false
 	)};
 
-	(($byte:expr, $word:literal))
+	($prefix:ident, ($byte:expr, $word:literal))
 	=> {_token_impl!(
+		$prefix,
 		$byte,
 		$word,
 		None,
 		Any,
 		true
 	)};
-	(($byte:expr, $word:literal, abbr $abbr:literal))
+	($prefix:ident, ($byte:expr, $word:literal, abbr $abbr:literal))
 	=> {_token_impl!(
+		$prefix,
 		$byte,
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
 		Any,
 		true
 	)};
-	(($byte:expr, $word:literal, abbr $abbr:literal, pos $pos:ident, nongreedy))
+	($prefix:ident, ($byte:expr, $word:literal, abbr $abbr:literal, pos $pos:ident, nongreedy))
 	=> {_token_impl!(
+		$prefix,
 		$byte,
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
@@ -218,16 +228,16 @@ macro_rules! _token_once {
 }
 
 macro_rules! token_map {
-	($name:ident, $( $groups:tt ,)*) => {
+	($name:ident, $prefix:ident, $( $groups:tt ,)*) => {
 		::lazy_static::lazy_static! {
 			static ref $name: &'static [Keyword] = vec![$(
-				_token_once!($groups),
+				_token_once!($prefix, $groups),
 			)*].leak();
 		}
 	}
 }
 
-token_map![TOKEN_MAP_DIRECT,
+token_map![TOKEN_MAP_DIRECT, Direct,
 	(0x7f, "OTHERWISE"),
 	(0x80, "AND", abbr 1),
 	(0x81, "DIV"),
@@ -358,12 +368,12 @@ token_map![TOKEN_MAP_DIRECT,
 	(0xff, "OSCLI", abbr 2),
 ];
 
-token_map![TOKEN_MAP_C6,
+token_map![TOKEN_MAP_C6, C6,
 	(0x8e, "SUM"),
 	(0x8f, "BEAT"),
 ];
 
-token_map![TOKEN_MAP_C7,
+token_map![TOKEN_MAP_C7, C7,
 	(0x8e, "APPEND"),
 	(0x8f, "AUTO", abbr 2),
 	(0x90, "CRUNCH"),
@@ -384,7 +394,7 @@ token_map![TOKEN_MAP_C7,
 	(0x9f, "INSTALL"),
 ];
 
-token_map![TOKEN_MAP_C8,
+token_map![TOKEN_MAP_C8, C8,
 	(0x8e, "CASE"),
 	(0x8f, "CIRCLE"),
 	(0x90, "FILL"),
