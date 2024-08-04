@@ -502,6 +502,9 @@ static INFERENCE_ALIGNMENT_TRIES: [(u16, NonZeroU16); 4] = [
 
 /// Infers line numbers for a block of unnumbered lines.
 ///
+/// Line numbers are selected based on subjective heuristics; it aims to use lines on multiples of
+/// 10, then tries smaller subdivisions of that, falling back to increments of 1 if nothing else
+/// works.
 /// This algorithm can fail if there is no room to add a unique number to every line requested;
 /// `basilisc` does not renumber a program.
 fn infer_line_number_range(line_before: Option<u16>, line_after: Option<u16>, num_lines: u16)

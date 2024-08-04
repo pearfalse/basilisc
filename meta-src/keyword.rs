@@ -6,6 +6,8 @@ use std::{fmt, num::NonZeroU8, mem};
 use arrayvec::ArrayVec;
 use ascii::{AsciiStr, AsAsciiStr, AsciiChar};
 
+use crate::token_iter::TokenIter;
+
 /// Length of the longest known keyword.
 pub const MAX_LEN: u8 = 9;
 
@@ -107,6 +109,15 @@ pub(crate) enum Prefix {
 
 impl Prefix {
 	const LOWER_BITS: u8 = 0b11_1111;
+
+	fn byte(self) -> u8 {
+		match self {
+			Self::Direct => 0,
+			Self::C6 => 0xc6,
+			Self::C7 => 0xc7,
+			Self::C8 => 0xc8,
+		}
+	}
 }
 
 
@@ -202,6 +213,18 @@ impl RawKeyword {
 			(false, true) => TokenPosition::Right,
 			(false, false) => TokenPosition::Any,
 			(true, true) => unreachable!("both LVALUE_ONLY and RVALUE_ONLY set!"),
+		}
+	}
+
+	/// Returns a `TokenIter` for this keyword's byte value.
+	pub fn tokens(&self) -> TokenIter {
+		let prefix: Prefix = unsafe {
+			std::mem::transmute(self.len_and_prefix.get() & !Prefix::LOWER_BITS)
+		};
+
+		match NonZeroU8::new(prefix.byte()) {
+			None => TokenIter::new_direct(self.token_byte),
+			Some(n) => TokenIter::new_indirect(n, self.token_byte)
 		}
 	}
 

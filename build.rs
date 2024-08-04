@@ -46,12 +46,10 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 	macro_rules! write_array {
 		($var:ident) => {
 			_write_array(&mut gen_token_data, &*$var, stringify!($var),
-				Prefix::Direct,
 				"/// Token data for the direct map.")
 		};
-		($var:ident, $prefix_enum:expr, $ind_prefix:literal) => {
+		($var:ident, $ind_prefix:literal) => {
 			_write_array(&mut gen_token_data, &*$var, stringify!($var),
-				$prefix_enum,
 				concat!("/// Token data for the indirect map (prefix ",
 					stringify!($ind_prefix),
 					")."
@@ -60,9 +58,9 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 		}
 	}
 	write_array!(TOKEN_MAP_DIRECT)?;
-	write_array!(TOKEN_MAP_C6, Prefix::C6, 0xc6)?;
-	write_array!(TOKEN_MAP_C7, Prefix::C7, 0xc7)?;
-	write_array!(TOKEN_MAP_C8, Prefix::C8, 0xc8)?;
+	write_array!(TOKEN_MAP_C6, 0xc6)?;
+	write_array!(TOKEN_MAP_C7, 0xc7)?;
+	write_array!(TOKEN_MAP_C8, 0xc8)?;
 
 	write_parse_map(&mut gen_token_data)?;
 
@@ -71,7 +69,6 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 	return Ok(());
 
 	fn _write_array(file: &mut fs::File, arr: &'static [Keyword], name: &'static str,
-		prefix: Prefix,
 		doc_string: &'static str,
 	) -> io::Result<()> {
 		fn reduce_front<T>(mut slice: &[Option<T>]) -> (&[Option<T>], usize) {
@@ -116,7 +113,7 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 }
 
 fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
-	let mut list: Vec<(&'static Keyword, TokenIter)>
+	let mut list: Vec<&'static Keyword>
 	= Vec::with_capacity(TOKEN_MAP_DIRECT.len()
 		+ TOKEN_MAP_C6.len() + TOKEN_MAP_C7.len() + TOKEN_MAP_C8.len());
 
@@ -127,35 +124,25 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 		(&TOKEN_MAP_C8, Some((NonZeroU8::new(0xc8).unwrap(), Prefix::C8))),
 	];
 
-	for (map, prefix) in baked_prefix {
-		for kw in map {
-			list.push((kw, if let Some((byte, _)) = prefix {
-				TokenIter::new_indirect(byte, kw.byte())
-			} else {
-				TokenIter::new_direct(kw.byte())
-			}));
-		}
+	for (map, _prefix) in baked_prefix {
+		list.extend(map);
 	}
 
 	list.sort_unstable();
 
-	writeln!(file, "pub(crate) type TokenLookupEntry = (RawKeyword, TokenIter);")?;
 	writeln!(file, r#"
 /// The lookup table used to convert an ASCII string of a keyword into its associated token data.
 ///
 /// The map is an array of sorted keywords (see [`Keyword`][K] for the actual sorting rules).
 ///
 /// [K]: crate::cooked_keyword::Keyword
-pub(crate) static LOOKUP_MAP: [TokenLookupEntry; {}] = unsafe {{["#,
+pub(crate) static LOOKUP_MAP: [RawKeyword; {}] = unsafe {{["#,
 		list.len(),
 	)?;
 	writeln!(file, "// SAFETY: values are generated from the same parsed type at build time")?;
 
-	for (keyword, value) in list {
-		writeln!(file, "\t( // {}", keyword.keyword().as_str())?;
-		writeln!(file, "\t\tRawKeyword::new_unchecked({:?}),", keyword.as_array())?;
-		writeln!(file, "\t\t{},", token_iter::Codegen::from(value, false))?;
-		writeln!(file, "\t),")?;
+	for keyword in list {
+		writeln!(file, "\tRawKeyword::new_unchecked({:?}),", keyword.as_array())?;
 	}
 	writeln!(file, "]}};")?;
 

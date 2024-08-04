@@ -6,10 +6,9 @@ use std::{fmt, mem};
 use arrayvec::ArrayVec;
 
 use crate::{
-	token_data::TokenLookupEntry,
 	token_iter::TokenIter,
 	support::{ArrayVecExt, HexArray},
-	keyword::TokenPosition,
+	keyword::{RawKeyword, TokenPosition},
 };
 
 // chars that didn't match anything
@@ -19,13 +18,13 @@ pub(super) type CharBuffer = ArrayVec<u8, { crate::keyword::MAX_LEN as usize }>;
 pub(super) struct TokenScanner {
 	char_buf: CharBuffer,
 	char_out_buf: CharBuffer,
-	best_match: Option<&'static TokenLookupEntry>,
-	pinch: &'static [TokenLookupEntry],
+	best_match: Option<&'static RawKeyword>,
+	pinch: &'static [RawKeyword],
 	is_lhs: bool,
 	else_hack: ElseHack,
 }
 
-static PINCH_ALL: &[TokenLookupEntry] = crate::token_data::LOOKUP_MAP.as_slice();
+static PINCH_ALL: &[RawKeyword] = crate::token_data::LOOKUP_MAP.as_slice();
 
 /// A (slightly hackish) way to handle that `ELSE` keywords tokenise differently when used in
 /// multi-line `IF` statements.
@@ -95,12 +94,12 @@ impl TokenScanner {
 			if let Some(char_buf_len) = NonZeroU8::new(self.char_buf.len() as u8) {
 				// (an empty char_buf wouldn't be useful)
 				debug_assert!(self.pinch.len() < PINCH_ALL.len());
-				let abbr_match = self.pinch.iter().find(|&(kw, _)| {
+				let abbr_match = self.pinch.iter().find(|&kw| {
 					let min_abbrev_len = kw.min_abbrev_len();
 					min_abbrev_len.is_some() && min_abbrev_len <= Some(char_buf_len)
 				});
-				if let Some((_kw, ti)) = abbr_match {
-					self.commit_to(ti);
+				if let Some(kw) = abbr_match {
+					self.commit_to(kw.tokens());
 					return;
 				}
 			}
@@ -143,12 +142,12 @@ impl TokenScanner {
 	/// You should always call this, then [`try_pull`](Self::try_pull), when you have no more bytes
 	/// coming in from a line.
 	pub fn flush(&mut self) {
-		if let Some((kw, ti)) = self.best_match.take().filter(|(kw, _)|
+		if let Some(kw) = self.best_match.take().filter(|kw|
 			kw.len().get() as usize == self.char_buf.len()
 		) {
 			// crush best_match chars into token equiv
 			// allow nongreedy keywords to do this if char_buf matches
-			let ti = ti.clone();
+			let ti = kw.tokens();
 			let ti_first = ti.peek_first();
 			self.char_out_buf.extend(ti.map(NonZeroU8::get));
 			self.char_out_buf.extend(self.char_buf.iter().copied().skip(kw.len().get() as usize));
@@ -200,14 +199,14 @@ impl TokenScanner {
 
 		// front byte first
 		while let Some((left, remain)) = self.pinch.split_first() {
-			let should_narrow_normal = left.0.as_ascii_str().as_bytes()
+			let should_narrow_normal = left.as_ascii_str().as_bytes()
 				.get(pinch_idx).map(|&b| b < ch) != Some(false);
 
 			// skip over RHS token if there is one
-			let should_narrow_lhs = self.is_lhs && left.0.position() == TokenPosition::Right;
+			let should_narrow_lhs = self.is_lhs && left.position() == TokenPosition::Right;
 			// if we did that, there must be a RHS one immediately after
 			debug_assert!(!should_narrow_lhs
-				|| remain.get(0).map(|(kw, _)| kw.position()) == Some(TokenPosition::Left));
+				|| remain.get(0).map(|kw| kw.position()) == Some(TokenPosition::Left));
 
 			if should_narrow_normal || should_narrow_lhs {
 				// not yet narrowed down to matching substrings
@@ -219,7 +218,7 @@ impl TokenScanner {
 
 		// then back byte
 		while let Some((right, remain)) = self.pinch.split_last() {
-			if right.0.as_bytes()
+			if right.as_bytes()
 			.get(pinch_idx).map(|&b| b > ch) == Some(true) {
 				// too flabby on the right
 				self.pinch = remain;
@@ -236,13 +235,13 @@ impl TokenScanner {
 
 		match *self.pinch {
 			// perfect match, greedy match
-			[(ref kw, ref ti)] if kw.is_greedy() && eq_char_buf!(kw) => {
-				self.commit_to(ti);
+			[ref kw] if kw.is_greedy() && eq_char_buf!(kw) => {
+				self.commit_to(kw.tokens());
 			},
 
 			// a good match, but there might be a longer one
-			[ref pair @ (ref kw, _), ..] if eq_char_buf!(kw) => {
-				self.best_match = Some(pair);
+			[ref kw, ..] if eq_char_buf!(kw) => {
+				self.best_match = Some(kw);
 			},
 
 			// confirmed no match; purge all known chars
@@ -256,13 +255,13 @@ impl TokenScanner {
 		};
 	}
 
-	fn commit_to(&mut self, ti: &TokenIter) {
+	fn commit_to(&mut self, ti: TokenIter) {
 		self.best_match = None; // forget that, we have a definite winner
 		self.set_token_buf(ti.clone());
 		self.char_buf.clear(); // all bytes accounted for
 		self.pinch = PINCH_ALL; // ready for future stuff
 
-		self.is_lhs = if ti.clone().peek_first() == ElseHack::THEN {
+		self.is_lhs = if ti.peek_first() == ElseHack::THEN {
 			self.else_hack.on_then = true;
 			true
 		} else {
@@ -271,7 +270,7 @@ impl TokenScanner {
 	}
 
 	fn commit_best_match(&mut self) {
-		if let Some((kw, best)) = self.best_match.take() {
+		if let Some(kw) = self.best_match.take() {
 			// should only commit if best match is either
 			// - greedy
 			// - nongreedy, but followed by something other than A-Z
@@ -282,7 +281,7 @@ impl TokenScanner {
 			};
 			if should_take {
 				// take this subset of characters, use it
-				self.set_token_buf(best.clone());
+				self.set_token_buf(kw.tokens());
 
 				// preserve unconsumed chars to re-add them
 				self.char_buf.remove_first(kw.len().get() as usize);
@@ -331,8 +330,8 @@ impl Default for TokenScanner {
 impl fmt::Debug for TokenScanner {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		struct PinchDebug {
-			front: Option<&'static TokenLookupEntry>,
-			back: Option<&'static TokenLookupEntry>,
+			front: Option<&'static RawKeyword>,
+			back: Option<&'static RawKeyword>,
 			count: usize,
 		}
 
@@ -348,7 +347,7 @@ impl fmt::Debug for TokenScanner {
 
 		impl fmt::Debug for PinchDebug {
 			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-				if let Some((front, _)) = self.front {
+				if let Some(front) = self.front {
 					write!(f, "\"{}\"", front.as_ascii_str())
 				} else {
 					f.write_str("(start)")
@@ -356,7 +355,7 @@ impl fmt::Debug for TokenScanner {
 
 				f.write_str(" to ")?;
 
-				if let Some((back, _)) = self.back {
+				if let Some(back) = self.back {
 					write!(f, "\"{}\"", back.as_ascii_str())
 				} else {
 					f.write_str("(end)")

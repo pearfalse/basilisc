@@ -5,7 +5,6 @@ use std::num::NonZeroU8;
 
 use ascii::{AsciiStr, AsAsciiStr as _};
 
-use crate::token_iter::TokenIter;
 use crate::keyword::{self, Prefix, RawKeyword, TokenPosition};
 
 
