@@ -31,10 +31,7 @@ impl<'a, T> SubArray<'a, T> {
 	}
 
 	/// Gets the raw slice within the subarray.
-	///
-	/// This method is only used in unit tests to help with iterating all populated values.
-	#[cfg(test)]
-	pub(crate) fn raw_slice(&self) -> &'a [T] {
+	pub fn as_raw_slice(&self) -> &'a [T] {
 		self.slice
 	}
 }

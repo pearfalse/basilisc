@@ -28,6 +28,8 @@ static_assertions = { workspace = true }
 nonzero_ext = { workspace = true }
 sptr = { workspace = true }
 
+basilisc-base = { path = "crates/basilisc-base" }
+
 gumdrop = "0.8"
 
 [profile.release]

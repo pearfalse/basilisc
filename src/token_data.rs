@@ -12,10 +12,9 @@ mod cooked_keyword;
 mod test_lookup {
 	// These tests are for lookups on generated data
 
-	use crate::{
-		keyword::RawKeyword,
-		subarray::SubArray,
-	};
+	use basilisc_base::subarray::SubArray;
+
+	use crate::keyword::RawKeyword;
 	use super::{TOKEN_MAP_DIRECT, TOKEN_MAP_C6, TOKEN_MAP_C7, TOKEN_MAP_C8};
 
 	#[test]
@@ -55,7 +54,7 @@ mod test_lookup {
 	fn proof_we_disallowed_empty_strings() {
 		fn all_str_lengths(table: SubArray<'static, Option<RawKeyword>>)
 			-> impl Iterator<Item = usize> {
-				table.raw_slice().iter()
+				table.as_raw_slice().iter()
 					.flat_map(Option::as_ref)
 					.map(|k| k.as_ascii_str().len())
 			}

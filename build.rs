@@ -33,9 +33,10 @@ use core::num::NonZeroU8;
 
 use crate::{{
 	keyword::RawKeyword,
-	subarray::SubArray,
 	token_iter::TokenIter,
 }};
+
+use basilisc_base::subarray::SubArray;
 
 /// The core type of the lookup tables.
 type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;

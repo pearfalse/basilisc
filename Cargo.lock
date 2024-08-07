@@ -27,6 +27,7 @@ dependencies = [
  "arrayvec",
  "ascii",
  "assert_hex",
+ "basilisc-base",
  "gumdrop",
  "lazy_static",
  "nonzero_ext",
