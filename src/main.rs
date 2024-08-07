@@ -6,10 +6,15 @@ use std::error::Error;
 
 use gumdrop::Options;
 
-include!("mod-decls.rs");
+pub mod support;
+pub mod token_data;
+pub mod line_numbers;
+pub mod latin1;
+pub mod unpack;
+pub mod pack;
+
 use pack::Error as PackError;
 use support::IoObject;
-
 
 #[derive(Debug, Options)]
 enum Command {

@@ -5,14 +5,12 @@ use std::{fmt, mem};
 
 use arrayvec::ArrayVec;
 
-use crate::{
-	token_iter::TokenIter,
-	support::{ArrayVecExt, HexArray},
-	keyword::{RawKeyword, TokenPosition},
-};
+use crate::support::{ArrayVecExt, HexArray};
+
+use basilisc_base::keyword::{RawKeyword, TokenIter, TokenPosition};
 
 // chars that didn't match anything
-pub(super) type CharBuffer = ArrayVec<u8, { crate::keyword::MAX_LEN as usize }>;
+pub(super) type CharBuffer = ArrayVec<u8, { basilisc_base::keyword::MAX_LEN as usize }>;
 
 /// Core tokeniser.
 pub(super) struct TokenScanner {

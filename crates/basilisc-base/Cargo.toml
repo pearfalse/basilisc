@@ -5,3 +5,6 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
+arrayvec = { workspace = true }
+ascii = { workspace = true }
+static_assertions = { workspace = true }

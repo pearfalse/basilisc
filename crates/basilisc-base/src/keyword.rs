@@ -6,7 +6,7 @@ use std::{fmt, num::NonZeroU8, mem};
 use arrayvec::ArrayVec;
 use ascii::{AsciiStr, AsAsciiStr, AsciiChar};
 
-use crate::token_iter::TokenIter;
+pub use crate::token_iter::TokenIter;
 
 /// Length of the longest known keyword.
 pub const MAX_LEN: u8 = 9;
@@ -23,7 +23,7 @@ pub const STORE_SIZE: u8 = 12;
 /// variant.
 #[derive(Clone, Copy)]
 #[repr(C, align(4))]
-pub(crate) struct RawKeyword {
+pub struct RawKeyword {
 	/// Actual meaningful characters
 	chars: [u8; MAX_LEN as usize],
 	/// Flags
@@ -77,7 +77,7 @@ impl Ord for RawKeyword {
 }
 
 /// Namespace for flag bits.
-pub(crate) mod flags {
+pub mod flags {
 	/// For keywords that may only match in lvalue position. Setting this alongside `RVALUE_ONLY`
 	/// is a logic error.
 	pub const LVALUE_ONLY         : u8 = 1<<7;
@@ -100,7 +100,7 @@ pub(crate) mod flags {
 /// Implementation detail for top bits in `RawKeyword::len_and_prefix`.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Prefix {
+pub enum Prefix {
 	Direct = 0,
 	C6 = 0x40,
 	C7 = 0x80,
@@ -127,7 +127,7 @@ impl Prefix {
 /// The three values order themselves (smallest to largest) as: Any, Right, Left.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
-pub(crate) enum TokenPosition {
+pub enum TokenPosition {
 	Any = 0,
 	Left = 2,
 	Right = 1,
@@ -167,7 +167,7 @@ impl RawKeyword {
 
 	#[inline]
 	/// Returns the length of this keyword.
-	pub(crate) fn len(&self) -> NonZeroU8 {
+	pub fn len(&self) -> NonZeroU8 {
 		unsafe {
 			// SAFETY: `len_and_prefix` is known to be non-zero in the lowest 6 bits
 			NonZeroU8::new_unchecked(self.len_and_prefix.get() & Prefix::LOWER_BITS)
@@ -175,10 +175,7 @@ impl RawKeyword {
 	}
 
 	/// Returns the keyword as an ASCII string slice.
-	///
-	/// There are two methods with this name, this one being specialised for borrowing `Keyword`
-	/// instances.
-	pub(crate) fn as_ascii_str(&self) -> &AsciiStr {
+	pub fn as_ascii_str(&self) -> &AsciiStr {
 		unsafe {
 			// SAFETY: slice is guaranteed by constructor checks to be ASCII
 			AsciiStr::from_ascii_unchecked(self.as_bytes())
@@ -197,7 +194,7 @@ impl RawKeyword {
 	///   the u8 cast of the appropriate `Prefix` value;
 	/// - `src[9]` must not set any bits in `flags::RESERVED`;
 	/// - The minimum abbrev length in `src[9]` must be less than the string length or zero.
-	pub(crate) const unsafe fn new_unchecked(src: [u8; STORE_SIZE as usize]) -> Self {
+	pub const unsafe fn new_unchecked(src: [u8; STORE_SIZE as usize]) -> Self {
 		let raw_len = src[STORE_SIZE as usize - 1] & Prefix::LOWER_BITS;
 		debug_assert!(raw_len > 0 && raw_len <= MAX_LEN);
 		mem::transmute(src)
@@ -252,7 +249,7 @@ impl RawKeyword {
 	}
 
 	/// Iterates over the contents of the keyword.
-	pub(crate) fn iter(&self) -> Iter<'_> {
+	pub fn iter(&self) -> Iter<'_> {
 		Iter::new(self)
 	}
 }
@@ -272,14 +269,14 @@ impl<'a> IntoIterator for &'a RawKeyword {
 /// Logically, the yielded item is an [`AsciiChar`](ascii::AsciiChar), but for maximum compatibility
 /// with the crate's call sites, it yields them as [`u8`]s.
 #[derive(Debug, Clone)]
-pub(crate) struct Iter<'a> {
+pub struct Iter<'a> {
 	keyword: &'a RawKeyword,
 	pos: u8,
 }
 
 impl Iter<'static> {
 	/// Returns a keyword iterator that yields no characters when iterated.
-	pub(crate) fn empty() -> Self {
+	pub fn empty() -> Self {
 		static EMPTY: RawKeyword = unsafe {
 			// SAFETY: this should match preconditions on RawKeyword::new_unchecked
 			RawKeyword::new_unchecked([
@@ -329,27 +326,4 @@ impl<'a> Iterator for Iter<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::cooked_keyword::*;
-
-	fn uncook(
-		byte: u8, word: &'static str, min_abbrev: Option<NonZeroU8>,
-		pos: TokenPosition, greedy: bool, prefix: Prefix
-	) -> RawKeyword {
-		let kw = Keyword::try_new(byte, word, min_abbrev, pos, greedy, prefix).unwrap();
-		RawKeyword::from(kw)
-	}
-
-	#[test]
-	fn min_abbrev() {
-		let kw = uncook(0x80, "LONG", NonZeroU8::new(2), TokenPosition::Any, false, Prefix::Direct);
-
-		assert_eq!(Some(AsciiStr::from_ascii(b"LO").unwrap()), kw.min_abbrev());
-	}
-
-	#[test]
-	fn token_iter() {
-		assert_eq!(b"PRINT", &*crate::token_data::TOKEN_MAP_DIRECT[0xf1]
-			.unwrap().iter()
-			.collect::<ArrayVec<u8, {MAX_LEN as usize}>>());
-	}
 }

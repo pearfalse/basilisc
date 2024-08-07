@@ -5,10 +5,11 @@ use std::{io, fmt::Debug, mem};
 
 use crate::{
 	support::{ArrayVecExt, NextByte, PerLineBits},
-	keyword,
 	token_data,
 	line_numbers,
 };
+
+use basilisc_base::keyword;
 
 use arrayvec::ArrayVec;
 use thiserror::Error;

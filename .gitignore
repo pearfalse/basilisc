@@ -2,6 +2,9 @@
 /scratch
 *.sublime-workspace
 
+# Generated data
+meta-src/
+
 # MacOS garbage
 ._*
 .DS_Store

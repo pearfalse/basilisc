@@ -1,11 +1,12 @@
 //! Cooked keywords are high-level representations of BASIC keyword data, used by the build script
 //! to generate raw keyword data. See [`Keyword`] for more.
 
+use std::fmt;
 use std::num::NonZeroU8;
 
 use ascii::{AsciiStr, AsAsciiStr as _};
 
-use crate::keyword::{self, Prefix, RawKeyword, TokenPosition};
+use basilisc_base::keyword::{self, Prefix, RawKeyword, TokenPosition};
 
 
 /// An error in keyword construction, if any constraints are not met.
@@ -14,6 +15,11 @@ use crate::keyword::{self, Prefix, RawKeyword, TokenPosition};
 #[derive(Debug)]
 pub(crate) struct KeywordCtorError(&'static str);
 
+impl fmt::Display for KeywordCtorError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str(self.0)
+	}
+}
 
 /// Represents a BASIC keyword at a high level. `build.rs` uses this to hold its own representation
 /// of all BASIC keywords `basilisc` needs to know about, and uses it to construct the
@@ -191,7 +197,7 @@ impl From<Keyword> for RawKeyword {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::keyword::TokenPosition;
+	use super::keyword::TokenPosition;
 
 	#[test]
 	fn byte() {
@@ -251,6 +257,21 @@ mod tests {
 	fn fail_C0() {
 		let _ = Keyword::try_new(155, "keywo\rd", None, TokenPosition::Any, false, Prefix::Direct)
 			.unwrap_err();
+	}
+
+	#[test]
+	fn min_abbrev() {
+		let kw = uncook(0x80, "LONG", NonZeroU8::new(2), TokenPosition::Any, false, Prefix::Direct);
+
+		assert_eq!(Some(AsciiStr::from_ascii(b"LO").unwrap()), kw.min_abbrev());
+	}
+
+	fn uncook(
+		byte: u8, word: &'static str, min_abbrev: Option<NonZeroU8>,
+		pos: TokenPosition, greedy: bool, prefix: Prefix
+	) -> RawKeyword {
+		let kw = Keyword::try_new(byte, word, min_abbrev, pos, greedy, prefix).unwrap();
+		RawKeyword::from(kw)
 	}
 }
 

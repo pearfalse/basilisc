@@ -2,11 +2,10 @@
 //!
 //! Most of the interesting data is generated from a high-level representation in `build.rs`.
 
-include!(concat!(env!("OUT_DIR"), "/token_data.rs"));
-
-#[cfg(test)]
-#[path = "../meta-src/cooked_keyword.rs"]
-mod cooked_keyword;
+/// To generate the contents of this file, run `cargo run -p token-data-gen`.
+#[path = "../meta-src/token_data.rs"]
+mod gen_data;
+pub(crate) use gen_data::{TOKEN_MAP_DIRECT, TOKEN_MAP_C6, TOKEN_MAP_C7, TOKEN_MAP_C8, LOOKUP_MAP};
 
 #[cfg(test)]
 mod test_lookup {
@@ -14,7 +13,7 @@ mod test_lookup {
 
 	use basilisc_base::subarray::SubArray;
 
-	use crate::keyword::RawKeyword;
+	use basilisc_base::keyword::RawKeyword;
 	use super::{TOKEN_MAP_DIRECT, TOKEN_MAP_C6, TOKEN_MAP_C7, TOKEN_MAP_C8};
 
 	#[test]
@@ -64,5 +63,15 @@ mod test_lookup {
 			.chain(all_str_lengths(TOKEN_MAP_C7))
 			.chain(all_str_lengths(TOKEN_MAP_C8))
 			.all(|sl| sl > 0));
+	}
+
+	#[test]
+	fn token_iter() {
+		use arrayvec::ArrayVec;
+
+		const MAX_LEN: usize = basilisc_base::keyword::MAX_LEN as usize;
+		assert_eq!(b"PRINT", &*crate::token_data::TOKEN_MAP_DIRECT[0xf1]
+			.unwrap().iter()
+			.collect::<ArrayVec<u8, MAX_LEN>>());
 	}
 }

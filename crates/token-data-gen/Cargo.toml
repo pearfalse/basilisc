@@ -5,3 +5,7 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
+ascii = { workspace = true }
+basilisc-base = { path = "../basilisc-base" }
+lazy_static = "1.4"
+nonzero_ext = { workspace = true }

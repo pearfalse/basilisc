@@ -38,10 +38,3 @@ codegen-units = 1
 
 [dev-dependencies]
 assert_hex = "0.2"
-
-[build-dependencies]
-static_assertions = "1.1"
-nonzero_ext = "0.3"
-lazy_static = "1.4"
-arrayvec = "0.7"
-ascii = "1.0"
