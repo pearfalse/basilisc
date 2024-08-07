@@ -169,6 +169,14 @@ impl Keyword {
     		None => TokenIter::new_direct(self.byte),
     	}
     }
+
+    pub(crate) fn nvalue_msg(&self) -> &'static str {
+    	match self.position {
+			TokenPosition::Any => "",
+			TokenPosition::Left => " (lvalue)",
+			TokenPosition::Right => " (rvalue)",
+		}
+    }
 }
 
 impl PartialOrd for Keyword {

@@ -92,8 +92,8 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 		for (i, maybe_val) in flat_arr.iter().copied().enumerate() {
 			let i = i + from;
 			if let Some(kw) = maybe_val {
-				writeln!(file, "\tSome(RawKeyword::new_unchecked({:?})), // {:02X} = {}",
-					kw.as_array(), i, kw.keyword().as_str())?;
+				writeln!(file, "\tSome(RawKeyword::new_unchecked({:?})), // {:02X} = {}{}",
+					kw.as_array(), i, kw.keyword().as_str(), kw.nvalue_msg())?;
 			} else {
 				writeln!(file, "\tNone, // {:02X} = <none>", i)?;
 			}
@@ -144,8 +144,8 @@ pub(crate) static LOOKUP_MAP: [RawKeyword; {}] = unsafe {{["#,
 			write!(&mut buf, "+{:02X}", second).expect("write failure");
 		}
 
-		writeln!(file, "\tRawKeyword::new_unchecked({:?}), // {} = {}",
-			keyword.as_array(), &buf, keyword.keyword().as_str())?;
+		writeln!(file, "\tRawKeyword::new_unchecked({:?}), // {} = {}{}",
+			keyword.as_array(), &buf, keyword.keyword().as_str(), keyword.nvalue_msg())?;
 	}
 	writeln!(file, "]}};")?;
 
