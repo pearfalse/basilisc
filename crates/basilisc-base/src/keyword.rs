@@ -110,13 +110,13 @@ pub enum Prefix {
 impl Prefix {
 	const LOWER_BITS: u8 = 0b11_1111;
 
-	fn byte(self) -> u8 {
-		match self {
+	pub fn byte(self) -> Option<NonZeroU8> {
+		NonZeroU8::new(match self {
 			Self::Direct => 0,
 			Self::C6 => 0xc6,
 			Self::C7 => 0xc7,
 			Self::C8 => 0xc8,
-		}
+		})
 	}
 }
 
@@ -219,7 +219,7 @@ impl RawKeyword {
 			std::mem::transmute(self.len_and_prefix.get() & !Prefix::LOWER_BITS)
 		};
 
-		match NonZeroU8::new(prefix.byte()) {
+		match prefix.byte() {
 			None => TokenIter::new_direct(self.token_byte),
 			Some(n) => TokenIter::new_indirect(n, self.token_byte)
 		}

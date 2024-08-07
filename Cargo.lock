@@ -142,6 +142,7 @@ dependencies = [
 name = "token-data-gen"
 version = "0.3.0"
 dependencies = [
+ "arrayvec",
  "ascii",
  "basilisc-base",
  "lazy_static",

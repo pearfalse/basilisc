@@ -103,6 +103,8 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 }
 
 fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
+	use std::fmt::Write as _;
+
 	let mut list: Vec<&'static Keyword>
 	= Vec::with_capacity(TOKEN_MAP_DIRECT.len()
 		+ TOKEN_MAP_C6.len() + TOKEN_MAP_C7.len() + TOKEN_MAP_C8.len());
@@ -131,9 +133,19 @@ pub(crate) static LOOKUP_MAP: [RawKeyword; {}] = unsafe {{["#,
 	)?;
 	writeln!(file, "// SAFETY: values are generated from the same parsed type at build time")?;
 
+	// "XX+XX".len() === 5
+	let mut buf = arrayvec::ArrayString::<5>::new();
+
 	for keyword in list {
-		writeln!(file, "\tRawKeyword::new_unchecked({:?}), // {}",
-			keyword.as_array(), keyword.keyword().as_str())?;
+		buf.clear();
+		let mut ti = keyword.token_iter();
+		write!(&mut buf, "{:02X}", ti.next().expect("empty TokenIter")).expect("write failure");
+		if let Some(second) = ti.next() {
+			write!(&mut buf, "+{:02X}", second).expect("write failure");
+		}
+
+		writeln!(file, "\tRawKeyword::new_unchecked({:?}), // {} = {}",
+			keyword.as_array(), &buf, keyword.keyword().as_str())?;
 	}
 	writeln!(file, "]}};")?;
 

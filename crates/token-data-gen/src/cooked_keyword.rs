@@ -6,7 +6,7 @@ use std::num::NonZeroU8;
 
 use ascii::{AsciiStr, AsAsciiStr as _};
 
-use basilisc_base::keyword::{self, Prefix, RawKeyword, TokenPosition};
+use basilisc_base::keyword::{self, Prefix, RawKeyword, TokenPosition, TokenIter};
 
 
 /// An error in keyword construction, if any constraints are not met.
@@ -160,6 +160,14 @@ impl Keyword {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn position(&self) -> TokenPosition {
         self.position
+    }
+
+    /// Gets an iterator for all bytes in this keyword.
+    pub(crate) fn token_iter(&self) -> TokenIter {
+    	match self.prefix.byte() {
+    		Some(lead) => TokenIter::new_indirect(lead, self.byte),
+    		None => TokenIter::new_direct(self.byte),
+    	}
     }
 }
 
