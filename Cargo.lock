@@ -41,6 +41,7 @@ version = "0.3.0"
 dependencies = [
  "arrayvec",
  "ascii",
+ "nonzero_ext",
  "static_assertions",
 ]
 

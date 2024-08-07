@@ -63,6 +63,10 @@ impl Iterator for TokenIter {
 		let len = <Self as ExactSizeIterator>::len(self);
 		(len, Some(len))
 	}
+
+	fn last(self) -> Option<Self::Item> where Self: Sized {
+		self.b.or(self.a)
+	}
 }
 
 impl FusedIterator for TokenIter { }
@@ -76,6 +80,7 @@ impl ExactSizeIterator for TokenIter {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use nonzero_ext::nonzero;
 
 	#[test]
 	fn direct() {
@@ -92,6 +97,25 @@ mod tests {
 
 	#[test]
 	fn indirect_c8() { test_indirect(0xc8) }
+
+	#[test]
+	fn last() {
+		assert_eq!(
+			Some(nonzero!(2u8)),
+			TokenIter::new_indirect(nonzero!(1u8), nonzero!(2u8)).last()
+		);
+
+		assert_eq!(
+			Some(nonzero!(3u8)),
+			TokenIter::new_direct(nonzero!(3u8)).last()
+		);
+
+		assert_eq!(Some(nonzero!(5u8)), {
+			let mut i = TokenIter::new_indirect(nonzero!(200u8), nonzero!(5u8));
+			let _ = i.next();
+			i.last()
+		});
+	}
 
 	fn test_indirect(prefix: u8) {
 		let prefix = NonZeroU8::new(prefix).unwrap();
