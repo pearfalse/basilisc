@@ -99,11 +99,11 @@ pub mod flags {
 	/// character immediately follows).
 	pub const GREEDY              : u8 = 1<<5;
 
+	/// Marks a keyword as directly preceding a line number reference (i.e. GOTO/GOSUB).
+	pub const TRIGGERS_LINE_REF   : u8 = 1<<4;
+
 	/// Marks the bytes reserved to hold the keyword minimum abbreviation length.
 	pub const MIN_ABBREV_LEN_MASK : u8 = 0b1111;
-
-	/// Bit mask for all bits not currently used to mean anything (these bits should be 0).
-	pub const RESERVED: u8 = !(LVALUE_ONLY | RVALUE_ONLY | GREEDY | MIN_ABBREV_LEN_MASK);
 }
 
 /// Implementation detail for top bits in `RawKeyword::len_and_prefix`.

@@ -190,6 +190,7 @@ macro_rules! _token_once {
 		$word,
 		None,
 		TokenPosition::Any,
+		false,
 		false
 	)};
 	($prefix:ident, ($byte:expr, $word:literal, abbr $abbr:literal, nongreedy))
@@ -199,6 +200,7 @@ macro_rules! _token_once {
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
 		TokenPosition::Any,
+		false,
 		false
 	)};
 
@@ -209,7 +211,8 @@ macro_rules! _token_once {
 		$word,
 		None,
 		TokenPosition::Any,
-		true
+		true,
+		false
 	)};
 	($prefix:ident, ($byte:expr, $word:literal, abbr $abbr:literal))
 	=> {$crate::token_impl_fn(
@@ -218,7 +221,8 @@ macro_rules! _token_once {
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
 		TokenPosition::Any,
-		true
+		true,
+		false
 	)};
 	($prefix:ident, ($byte:expr, $word:literal, abbr $abbr:literal, pos $pos:ident, nongreedy))
 	=> {$crate::token_impl_fn(
@@ -227,6 +231,17 @@ macro_rules! _token_once {
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
 		TokenPosition::$pos,
+		true,
+		false
+	)};
+	($prefix:ident, ($byte:expr, $word:literal, abbr $abbr:literal, line_ref))
+	=> {$crate::token_impl_fn(
+		Prefix::$prefix,
+		$byte,
+		$word,
+		Some(::nonzero_ext::nonzero!($abbr as u8)),
+		TokenPosition::Any,
+		true,
 		true
 	)};
 }
@@ -342,8 +357,8 @@ token_map![TOKEN_MAP_DIRECT, Direct,
 	(0xe1, "ENDPROC", abbr 1, nongreedy),
 	(0xe2, "ENVELOPE", abbr 2),
 	(0xe3, "FOR", abbr 1),
-	(0xe4, "GOSUB", abbr 3),
-	(0xe5, "GOTO", abbr 1),
+	(0xe4, "GOSUB", abbr 3, line_ref),
+	(0xe5, "GOTO", abbr 1, line_ref),
 	(0xe6, "GCOL", abbr 2),
 	(0xe7, "IF"),
 	(0xe8, "INPUT", abbr 1),

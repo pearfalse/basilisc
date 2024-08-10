@@ -41,6 +41,7 @@ pub(crate) struct Keyword {
 	min_abbrev: Option<NonZeroU8>,
 	position: TokenPosition,
 	greedy: bool,
+	triggers_line_ref: bool,
 	prefix: Prefix,
 }
 
@@ -59,6 +60,7 @@ impl Keyword {
 		min_abbrev: Option<NonZeroU8>,
 		position: TokenPosition,
 		greedy: bool,
+		triggers_line_ref: bool,
 		prefix: Prefix,
 	) -> Result<Self, KeywordCtorError> {
 		// byte must be high
@@ -87,7 +89,7 @@ impl Keyword {
 
 		let keyword = unsafe { keyword.as_ascii_str_unchecked() };
 		Ok(Self {
-			byte, keyword, position, min_abbrev, greedy, prefix
+			byte, keyword, position, min_abbrev, greedy, triggers_line_ref, prefix
 		})
 	}
 
@@ -119,6 +121,9 @@ impl Keyword {
 				Right => flags::RVALUE_ONLY,
 			}) | (match self.greedy {
 				true => flags::GREEDY,
+				false => 0,
+			}) | (match self.triggers_line_ref {
+				true => flags::TRIGGERS_LINE_REF,
 				false => 0,
 			})
 		};
@@ -208,7 +213,7 @@ mod tests {
 	#[test]
 	fn byte() {
 		for b in [0x98, 0xca, 0xff, 0x7f, 0xbdu8] {
-			let k = Keyword::try_new(b, "WORD", None, TokenPosition::Any, false, Prefix::Direct)
+			let k = Keyword::try_new(b, "WORD", None, TokenPosition::Any, false, false, Prefix::Direct)
 				.unwrap();
 			assert_eq!(b, k.byte().get());
 		}
@@ -216,14 +221,15 @@ mod tests {
 
 	#[test]
 	fn as_ascii_str() {
-		let k = Keyword::try_new(255, "ASCIIstr", None, keyword::TokenPosition::Any, false, Prefix::Direct)
+		let k = Keyword::try_new(255, "ASCIIstr", None, keyword::TokenPosition::Any, false, false, Prefix::Direct)
 			.unwrap();
 		assert_eq!(AsciiStr::from_ascii(b"ASCIIstr").unwrap(), k.keyword());
 	}
 
 	#[test]
 	fn as_array() {
-		let k = Keyword::try_new(255, "ABCDEFGHI", None, keyword::TokenPosition::Any, false, Prefix::Direct)
+		let k = Keyword::try_new(255, "ABCDEFGHI", None, keyword::TokenPosition::Any,
+			false, false, Prefix::Direct)
 			.unwrap();
 		assert_eq!([65,66,67,68,69,70,71,72,73,0,255,9], k.as_array());
 	}
@@ -238,7 +244,7 @@ mod tests {
 		] {
 			for abbrev_len in 0u8..(KEYWORD.len() as u8 - 1) {
 				let abbrev_len = NonZeroU8::new(abbrev_len);
-				let kw = Keyword::try_new(255, KEYWORD, abbrev_len, pos, false, Prefix::Direct)
+				let kw = Keyword::try_new(255, KEYWORD, abbrev_len, pos, false, false, Prefix::Direct)
 					.unwrap();
 				assert_eq!(pos, kw.position());
 				assert_eq!(abbrev_len, kw.min_abbrev());
@@ -248,36 +254,33 @@ mod tests {
 
 	#[test]
 	fn fail_too_long() {
-		let _ = Keyword::try_new(155, "ASCIIstr??", None, TokenPosition::Any, false, Prefix::Direct)
+		let _ = Keyword::try_new(155, "ASCIIstr??", None, TokenPosition::Any,
+			false, false, Prefix::Direct)
 			.unwrap_err();
 	}
 
 	#[test]
 	fn fail_not_ascii() {
-		let _ = Keyword::try_new(155, "1234\u{4e94}", None, TokenPosition::Any, false, Prefix::Direct)
+		let _ = Keyword::try_new(155, "1234\u{4e94}", None, TokenPosition::Any,
+			false, false, Prefix::Direct)
 			.unwrap_err();
 	}
 
 	#[test]
 	#[allow(non_snake_case)]
 	fn fail_C0() {
-		let _ = Keyword::try_new(155, "keywo\rd", None, TokenPosition::Any, false, Prefix::Direct)
+		let _ = Keyword::try_new(155, "keywo\rd", None, TokenPosition::Any,
+			false, false, Prefix::Direct)
 			.unwrap_err();
 	}
 
 	#[test]
 	fn min_abbrev() {
-		let kw = uncook(0x80, "LONG", NonZeroU8::new(2), TokenPosition::Any, false, Prefix::Direct);
+		let kw = RawKeyword::from(Keyword::try_new(
+			0x80, "LONG", NonZeroU8::new(2), TokenPosition::Any, false, false, Prefix::Direct
+		).unwrap());
 
 		assert_eq!(Some(AsciiStr::from_ascii(b"LO").unwrap()), kw.min_abbrev());
-	}
-
-	fn uncook(
-		byte: u8, word: &'static str, min_abbrev: Option<NonZeroU8>,
-		pos: TokenPosition, greedy: bool, prefix: Prefix
-	) -> RawKeyword {
-		let kw = Keyword::try_new(byte, word, min_abbrev, pos, greedy, prefix).unwrap();
-		RawKeyword::from(kw)
 	}
 }
 
