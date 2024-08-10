@@ -91,7 +91,7 @@ impl PerLineBits {
 
 /// A mutable reference, logically speaking, to a single bit in a byte array.
 ///
-/// Returned by the `get_mut` and `try_get_mut` methods on [`PerLineBits`][PerLineBits].
+/// Returned by the `get_mut` and `try_get_mut` methods on [`PerLineBits`].
 #[derive(Debug)]
 pub struct BitRefMut<'a> {
 	r#ref: &'a mut u8,
@@ -128,7 +128,7 @@ impl<'a> BitRefMut<'a> {
 
 /// An iterator over all bit values.
 ///
-/// Constructed by the `iter` method on [`PerLineBits`][PerLineBits].
+/// Constructed by the `iter` method on [`PerLineBits`].
 #[derive(Debug)]
 pub struct Iter<'a> {
 	bytes: slice::Iter<'a, u8>,

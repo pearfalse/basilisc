@@ -13,6 +13,12 @@ pub mod latin1;
 pub mod unpack;
 pub mod pack;
 
+#[cfg(doc)]
+pub use basilisc_base::keyword;
+
+#[cfg(doc)]
+pub use basilisc_base::subarray;
+
 use pack::Error as PackError;
 use support::IoObject;
 
