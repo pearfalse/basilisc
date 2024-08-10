@@ -118,7 +118,12 @@ impl TokenScanner {
 
 	/// Pushes a new byte (a RISC OS Latin-1 char) into the scanner.
 	pub fn push(&mut self, ch: u8) -> Result<(), Error> {
-		self.string_state.update_state(ch);
+		let just_entered_string = {
+			let old_string_state = self.string_state;
+			self.string_state.update_state(ch);
+			self.string_state == StringState::InString
+			&& old_string_state == StringState::NotInString
+		};
 
 		match self.string_state {
 			StringState::NotInString => {}, // proceed to the rest of the logic
@@ -128,6 +133,10 @@ impl TokenScanner {
 				// - just closed a string literal, and should output this quote mark
 				// - are in '"' 1 of 2 for an escape, but the second will be suppressed
 				//   so just output this one
+				if just_entered_string {
+					// we may have cut off a nongreedy match
+					self.commit_best_match();
+				}
 				self.char_out_buf.push(ch);
 				return Ok(());
 			}
