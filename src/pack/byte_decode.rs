@@ -14,7 +14,7 @@ use crate::{
 	support::IoObject,
 };
 
-use super::Error;
+use super::ErrorKind;
 
 /// Handles converting to/from UTF-8 and RISC OS Latin-1 in byte streams.
 ///
@@ -60,7 +60,7 @@ impl<'a> ByteDecoder<'a> {
 	}
 
 	/// Reads the next encoding-mapped byte from the source.
-	pub fn read_next(&mut self) -> Result<Option<u8>, Error> {
+	pub fn read_next(&mut self) -> Result<Option<u8>, ErrorKind> {
 		let ch: char = loop {
 			if let Some(c) = self.try_next_char()? { break c; } // found a char
 
@@ -74,15 +74,15 @@ impl<'a> ByteDecoder<'a> {
 
 		ch.as_risc_os_latin1()
 			.map(Option::Some)
-			.ok_or_else(|| Error::NoLatin1Char(ch))
+			.ok_or_else(|| ErrorKind::NoLatin1Char(ch))
 	}
 
 
-	fn utf8_error(&self) -> Error {
-    	Error::InvalidUtf8 { start_pos: self.last_read_pos }
+	fn utf8_error(&self) -> ErrorKind {
+    	ErrorKind::InvalidUtf8 { start_pos: self.last_read_pos }
 	}
 
-	fn try_next_char(&mut self) -> Result<Option<char>, Error> {
+	fn try_next_char(&mut self) -> Result<Option<char>, ErrorKind> {
 		let slice = unsafe { &*self.drain };
 		let lead = match slice.first().copied() {
 			Some(c) => c,
@@ -107,7 +107,7 @@ impl<'a> ByteDecoder<'a> {
 
 		self.drain = &slice[(char8_len as usize)..] as *const [u8];
 		std::str::from_utf8(char8_slice)
-			.map_err(|_| Error::InvalidUtf8 { start_pos: self.last_read_pos })
+			.map_err(|_| ErrorKind::InvalidUtf8 { start_pos: self.last_read_pos })
 			.map(|s| {
 				self.last_read_pos += char8_len as u64;
 				Some(s.chars().next().unwrap())
@@ -214,7 +214,7 @@ mod tests {
 
 	#[test]
 	fn catch_trailing_failures() {
-		check_err(b"ABC\xe0", Error::InvalidUtf8 { start_pos: 3 }, None);
+		check_err(b"ABC\xe0", ErrorKind::InvalidUtf8 { start_pos: 3 }, None);
 	}
 
 	fn check(input: &[u8], output: &[u8], buf_size: Option<usize>) {
@@ -224,13 +224,13 @@ mod tests {
 		assert_hex::assert_eq_hex!(Ok(output), out_buf.as_ref().map(Deref::deref));
 	}
 
-	fn check_err(input: &[u8], output: Error, buf_size: Option<usize>) {
+	fn check_err(input: &[u8], output: ErrorKind, buf_size: Option<usize>) {
 		let out_err = check_impl(input, 0, buf_size);
 		assert_eq!(Err(output), out_err)
 	}
 
 	fn check_impl(input: &[u8], output_cap: usize, buf_size: Option<usize>)
-	-> Result<Vec<u8>, Error> {
+	-> Result<Vec<u8>, ErrorKind> {
 		let mut out_buf = Vec::with_capacity(output_cap);
 		let mut input = io::Cursor::new(input);
 		let mut sut = ByteDecoder::with_capacity(&mut input,

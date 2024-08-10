@@ -1,6 +1,6 @@
 //! Handles packing a textual BBC BASIC representation into a tokenised BASIC file (type `&FFB`).
 
-use std::{num::NonZeroU16, io};
+use std::{fmt, num::NonZeroU16, io};
 
 use arrayvec::ArrayVec;
 use nonzero_ext::nonzero;
@@ -25,7 +25,7 @@ const LINE_NUMBER_CAP: u16 = 0xff00;
 
 /// All errors that can occur when encoding.
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum ErrorKind {
 	/// User tried to add too many lines to the program.
 	#[error("too many lines in program (limit is 65280)")]
 	TooManyLines,
@@ -59,13 +59,38 @@ pub enum Error {
 	IoError(#[from] std::io::Error),
 }
 
-impl From<std::convert::Infallible> for Error {
+/// Struct for errors that can occur when encoding a text file.
+#[derive(Debug, PartialEq)]
+pub struct Error {
+	pub line_number: u32,
+	pub kind: ErrorKind,
+}
+
+impl fmt::Display for Error {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		fmt::Display::fmt(&self.kind, f)?;
+		if self.line_number != u32::MAX {
+			write!(f, " at line {}", self.line_number)?;
+		}
+		Ok(())
+	}
+}
+
+impl std::error::Error for Error { }
+
+impl From<io::Error> for Error {
+	fn from(ioe: io::Error) -> Self {
+		Self { line_number: u32::MAX, kind: ErrorKind::IoError(ioe) }
+	}
+}
+
+impl From<std::convert::Infallible> for ErrorKind {
 	fn from(src: std::convert::Infallible) -> Self {
 		match src { }
 	}
 }
 
-impl From<token_scan::Error> for Error {
+impl From<token_scan::Error> for ErrorKind {
 	fn from(inner: token_scan::Error) -> Self {
 		match inner {
 			token_scan::Error::InvalidLineRef { after }
@@ -74,9 +99,9 @@ impl From<token_scan::Error> for Error {
 	}
 }
 
-impl PartialEq for Error {
+impl PartialEq for ErrorKind {
 	fn eq(&self, other: &Self) -> bool {
-		use Error::*;
+		use ErrorKind::*;
 		match (self, other) {
 			(
 				&TooManyUnnumberedLines { max_possible: max1, needed: need1 },
@@ -136,6 +161,7 @@ struct UnnumberedLine {
 
 /// Common result type for this module.
 type Result<T> = ::std::result::Result<T, Error>;
+type KindResult<T> = ::std::result::Result<T, ErrorKind>;
 
 /// The core structure for encoding a BASIC file.
 #[derive(Debug)]
@@ -168,7 +194,10 @@ impl<'a> Parser<'a> {
 
 		if self.lines.len() == LINE_NUMBER_CAP as usize {
 			// cannot add more lines, no way no how
-			return Err(Error::TooManyLines);
+			return Err(Error {
+				line_number: LINE_NUMBER_CAP as u32,
+				kind: ErrorKind::TooManyLines,
+			});
 		}
 
 		if let Some(maybe_ln) = self.raw_line()? {
@@ -191,15 +220,21 @@ impl<'a> Parser<'a> {
 			InLineBody { line_number: Option<u16> },
 		}
 
+		let this_line_number = self.lines.len().saturating_add(1).min(u32::MAX as usize) as u32;
+		let wrap_error = move |kind| Error {
+			line_number: this_line_number,
+			kind,
+		};
+
 		let mut state = LineParser::BeforeLineNumber;
 		self.buf.clear();
 		self.is_eof = true; // assume EOF, prove wrong when breaking on `\n`
-		while let Some(byte) = self.inner.read_next()? {
+		while let Some(byte) = self.inner.read_next().map_err(wrap_error)? {
 			match byte {
 				b'\r' => continue, // blunt way of handling CRLF
 				b'\n' => {
 					self.is_eof = false;
-					self.flush_token_scanner()?; // reset token scanning, sort of
+					self.flush_token_scanner().map_err(wrap_error)?; // reset token scanning, sort of
 					break
 				}, // end of line
 				_ => {},
@@ -215,7 +250,7 @@ impl<'a> Parser<'a> {
 					other => {
 						// no line number, line has started
 						state = LineParser::InLineBody { line_number: None };
-						self.update_body(other)?;
+						self.update_body(other).map_err(wrap_error)?;
 					}
 				},
 				LineParser::ParsingLineNumber { ref mut stage } => match byte {
@@ -223,20 +258,21 @@ impl<'a> Parser<'a> {
 						let new = ((*stage) as u32) * 10 + (byte - b'0') as u32;
 						*stage = u16::try_from(new).ok()
 							.filter(|&ln| ln < LINE_NUMBER_CAP)
-							.ok_or(Error::LineNumberOutOfRange { found: new })?;
+							.ok_or(ErrorKind::LineNumberOutOfRange { found: new })
+							.map_err(wrap_error)?;
 					},
 					other => {
 						state = LineParser::InLineBody { line_number: Some(*stage) };
-						self.update_body(other)?;
+						self.update_body(other).map_err(wrap_error)?;
 					},
 				},
 				LineParser::InLineBody { line_number: _ } => {
-					self.update_body(byte)?
+					self.update_body(byte).map_err(wrap_error)?
 				},
 			};
 		}
 
-		self.flush_token_scanner()?;
+		self.flush_token_scanner().map_err(wrap_error)?;
 
 		let final_line_number = match state {
 			LineParser::BeforeLineNumber => return Ok(None),
@@ -247,7 +283,7 @@ impl<'a> Parser<'a> {
 		Ok(Some(final_line_number))
 	}
 
-	fn flush_token_scanner(&mut self) -> Result<()> {
+	fn flush_token_scanner(&mut self) -> KindResult<()> {
 		self.token_scan.flush()?;
 		let mut flushed_bytes = token_scan::CharBuffer::new();
 		while let Some(b) = self.token_scan.try_pull() {
@@ -262,11 +298,19 @@ impl<'a> Parser<'a> {
 	pub fn write(self, target: &mut dyn io::Write) -> Result<()> {
 		let lines = self.into_lines()?;
 
-		for line in lines {
-			line.write(target)?;
+		let ln = std::cell::Cell::new(0u32);
+		let wrap_error = |ioe| Error {
+			line_number: ln.get() as u32,
+			kind: ErrorKind::IoError(ioe)
+		};
+
+		for (i, line) in lines.into_iter().enumerate() {
+			ln.set(i as u32);
+			line.write(target).map_err(wrap_error)?;
 		}
 
-		target.write_all(&[0x0d, 0xff])?;
+		ln.set(u32::MAX);
+		target.write_all(&[0x0d, 0xff]).map_err(wrap_error)?;
 		Ok(())
 	}
 
@@ -290,7 +334,7 @@ impl<'a> Parser<'a> {
 		}).collect::<Vec<Line>>())
 	}
 
-	fn update_body(&mut self, byte: u8) -> Result<()> {
+	fn update_body(&mut self, byte: u8) -> KindResult<()> {
 		self.token_scan.push(byte)?;
 
 		// narrowing can release a token too
@@ -301,12 +345,12 @@ impl<'a> Parser<'a> {
 		Ok(())
 	}
 
-	fn try_add_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+	fn try_add_bytes(&mut self, bytes: &[u8]) -> KindResult<()> {
 		let error = {
 			let add_len: u16 = bytes.len().try_into().expect("can't add over 65K bytes!");
 			let old_buf_len = self.buf.len() as u16;
 
-			move || Error::LineTooLong {
+			move || ErrorKind::LineTooLong {
 				length: match old_buf_len.saturating_add(add_len) {
 					fits if fits < u16::MAX => fits, // ???
 					too_big => panic!("tried to create line length {}, which is impossibly large",
@@ -337,7 +381,7 @@ mod test_parser {
 			println!("case: attempt {}, reach {}", attempt, reach);
 			write!(buf, "{}", attempt).unwrap();
 			assert_eq!(
-				Err(Error::LineNumberOutOfRange { found: reach }),
+				Err(Error { line_number: 1, kind: ErrorKind::LineNumberOutOfRange { found: reach } }),
 				Parser::new(&mut io::Cursor::new(buf.as_str().as_bytes())).next_line(),
 			);
 		}
@@ -573,9 +617,12 @@ fn infer_line_number_range(line_before: Option<u16>, line_after: Option<u16>, nu
 		}
 	}
 
-	Err(Error::TooManyUnnumberedLines {
-		max_possible: line_after - line_before.map(|lb| lb + 1).unwrap_or(0),
-		needed: num_lines.into(),
+	Err(Error {
+		line_number: u32::MAX,
+		kind: ErrorKind::TooManyUnnumberedLines {
+			max_possible: line_after - line_before.map(|lb| lb + 1).unwrap_or(0),
+			needed: num_lines.into(),
+		}
 	})
 }
 
@@ -618,25 +665,23 @@ mod test_line_number_inference {
 
 	#[test]
 	fn no_room() {
-		assert_eq!(
-			Err(Error::TooManyUnnumberedLines { max_possible: 10, needed: 11, }),
-			infer_line_number_range(Some(100), Some(111), 11)
-		);
+		fn assert_one(
+			line_before: Option<u16>, line_after: Option<u16>, num_lines: u16,
+			max_possible: u16, needed: u32
+		) {
+			assert_eq!(
+				Err(Error {
+					line_number: u32::MAX,
+					kind: ErrorKind::TooManyUnnumberedLines { max_possible, needed }
+				}),
+				infer_line_number_range(line_before, line_after, num_lines)
+			);
+		}
 
-		assert_eq!(
-			Err(Error::TooManyUnnumberedLines { max_possible: 0, needed: 1 }),
-			infer_line_number_range(Some(1), Some(2), 1)
-		);
-
-		assert_eq!(
-			Err(Error::TooManyUnnumberedLines { max_possible: 100, needed: 101 }),
-			infer_line_number_range(None, Some(100), 101)
-		);
-
-		assert_eq!(
-			Err(Error::TooManyUnnumberedLines { max_possible: 255, needed: 256 }),
-			infer_line_number_range(Some(0xfe00), None, 256)
-		);
+		assert_one(Some(100), Some(111), 11, 10, 11);
+		assert_one(Some(1), Some(2), 1, 0, 1);
+		assert_one(None, Some(100), 101, 100, 101);
+		assert_one(Some(0xfe00), None, 256, 255, 256);
 	}
 
 	#[test]
