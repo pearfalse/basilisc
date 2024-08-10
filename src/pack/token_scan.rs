@@ -505,7 +505,7 @@ impl fmt::Debug for TokenScanner {
 
 
 impl StringState {
-	fn update_state(&mut self, ch: u8) {
+	pub(super) fn update_state(&mut self, ch: u8) {
 		if ch == b'"' {
 			*self = match *self {
 				// open string, or complete escaping

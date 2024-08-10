@@ -1,11 +1,12 @@
 //! Handles packing a textual BBC BASIC representation into a tokenised BASIC file (type `&FFB`).
 
-use std::{fmt, num::NonZeroU16, io};
+use std::{cell::Cell, fmt, io, num::NonZeroU16};
 
 use arrayvec::ArrayVec;
+use basilisc_base::keyword::{Prefix, RawKeyword};
 use nonzero_ext::nonzero;
 
-use crate::support::IoObject;
+use crate::{support::IoObject, common::StringState};
 
 mod gaps;
 use gaps::*;
@@ -18,6 +19,10 @@ use byte_decode::ByteDecoder;
 
 /// The maximum length a BASIC line can be (`u8::MAX` minus 4 bytes of header).
 const MAX_LINE_LEN: usize = 251;
+
+/// The maximum tokenised line length we'll consider (in case we can make it fit by heuristically
+/// assuming we'd previously unpacked a squashed BASIC file by inserting spaces).
+const MAX_SPACEFUL_LINE_LEN: usize = MAX_LINE_LEN * 2 - 1;
 
 /// The maximum number of lines allowable in a BASIC file.
 const LINE_NUMBER_CAP: u16 = 0xff00;
@@ -175,7 +180,7 @@ type KindResult<T> = ::std::result::Result<T, ErrorKind>;
 /// The core structure for encoding a BASIC file.
 #[derive(Debug)]
 pub struct Parser<'a> {
-	buf: Box<ArrayVec<u8, MAX_LINE_LEN>>,
+	buf: Box<ArrayVec<u8, MAX_SPACEFUL_LINE_LEN>>,
 	lines: Vec<UnnumberedLine>,
 	token_scan: TokenScanner,
 	inner: ByteDecoder<'a>,
@@ -289,7 +294,69 @@ impl<'a> Parser<'a> {
 			LineParser::InLineBody { line_number } => line_number,
 		};
 
+		if self.buf.len() > MAX_LINE_LEN {
+			// Is that because this was a squashed BASIC file we previously unpacked, inserting
+			// spaces to ensure it'd survive a plaintext roundtrip? If it looks like it was,
+			// just remove the spaces again.
+			self.last_ditch_remove_all_nongreedy_spaces();
+
+			// how about now?
+			if self.buf.len() > MAX_LINE_LEN {
+				return Err(wrap_error(ErrorKind::LineTooLong { length: self.buf.len() as u16 }));
+			}
+		}
+
 		Ok(Some(final_line_number))
+	}
+
+	fn last_ditch_remove_all_nongreedy_spaces(&mut self) {
+		let mut len = self.buf.len();
+		let buf = Cell::from_mut(&mut **self.buf).as_slice_of_cells();
+		let mut in_string = StringState::NotInString;
+
+		// every time we find a space after a nongreedy token, remove it
+		let mut last_token_was_nongreedy = false;
+		let mut iter_write = buf.iter();
+
+		let mut prefix = Prefix::Direct;
+
+		for read in buf {
+			let ch = read.get();
+			// if in a string literal, don't remove any spaces!
+			in_string.update_state(ch);
+
+			match ch {
+				b' ' if std::mem::replace(&mut last_token_was_nongreedy, false)
+				&& in_string != StringState::InString => {
+					len -= 1;
+					continue // DON'T copy that space
+				},
+				low if low < 0x7f => prefix = Prefix::Direct, // no other non-token bytes are relevant
+				0xc6 => prefix = Prefix::C6,
+				0xc7 => prefix = Prefix::C7,
+				0xc8 => prefix = Prefix::C8,
+				maybe_tok => {
+					let lookup = match prefix {
+						Prefix::Direct => &crate::token_data::TOKEN_MAP_DIRECT,
+						Prefix::C6 => &crate::token_data::TOKEN_MAP_C6,
+						Prefix::C7 => &crate::token_data::TOKEN_MAP_C7,
+						Prefix::C8 => &crate::token_data::TOKEN_MAP_C8,
+					};
+					last_token_was_nongreedy =
+						lookup.get_flat(maybe_tok as usize).map(RawKeyword::is_greedy)
+						== Some(false);
+				}
+			}
+
+			// copy byte
+			iter_write.next().expect("write cell iter exceeded read").set(read.get());
+		}
+
+		debug_assert!(len <= self.buf.len());
+		unsafe {
+			// SAFETY: we're only shrinking the arrayvec, never below 0, values are Copy
+			self.buf.set_len(len);
+		}
 	}
 
 	fn flush_token_scanner(&mut self) -> KindResult<()> {
@@ -482,6 +549,7 @@ mod test_parser {
 				(10, b"\xc8\x8er%\xca"),
 				(20, b"\xc9"),
 			], true);
+		expect_success(b"STOP\"BONK\"", &[(10, b"\xfa\"BONK\"")], true);
 	}
 
 	#[test]
@@ -492,7 +560,51 @@ mod test_parser {
 			&[(10, b"\xe5\x8dTT@:\xf1\"never print this\"")], false);
 	}
 
+	#[test]
+	fn line_too_long() {
+		expect_failure(
+			&vec![b'!'; MAX_LINE_LEN + 1],
+			Error { line_number: 1, kind: ErrorKind::LineTooLong { length: 252 } }
+		);
+	}
+
+	#[test]
+	fn line_too_long_unless_you_think_of_it_as_an_unpack_safe_squashed_line_then_its_fine() {
+		let mut input = Vec::new();
+		let mut expect = Vec::new();
+		for _ in 0..(MAX_LINE_LEN / 3) {
+			input.extend_from_slice(b"REPORT RETURN STOP ");
+			expect.extend_from_slice(&[0xf6, 0xf8, 0xfa]);
+		}
+		input.pop();
+		assert!(input.len() > MAX_LINE_LEN, "test is inconclusive");
+
+		expect_success(&input, &[(10, &expect)], true);
+	}
+
+	#[test]
+	fn squash_spaces_except_in_string_literals() {
+		let mut input = Vec::new();
+		let mut expect = Vec::new();
+		for _ in 0..70 {
+			input.extend_from_slice(b"REPORT RETURN STOP ");
+			expect.extend_from_slice(&[0xf6, 0xf8, 0xfa]);
+		}
+		input.pop();
+		const LITERAL: &[u8] = b"\"BUT LEAVE ME ALONE\""; // this contains "ON", a greedy keyword!
+		input.extend_from_slice(LITERAL);
+		expect.extend_from_slice(LITERAL);
+
+		input.extend_from_slice(b" FALSE FALSE FALSE");
+		expect.extend_from_slice(b" \xa3\xa3\xa3"); // notice the leading space should stay
+
+		assert!(input.len() > MAX_LINE_LEN, "test is inconclusive");
+
+		expect_success(&input, &[(10, &expect)], true);
+	}
+
 	fn expect_success(input: &[u8], output: &[(u16, &[u8])], set_numbers: bool) {
+		println!("testing (expect success): {}", input.escape_ascii());
 		let mut cursor = io::Cursor::new(input);
 		let mut parser = Parser::new(&mut cursor);
 
@@ -522,6 +634,21 @@ mod test_parser {
 		} else {
 			check!(parser.lines, ::std::option::Option::Some);
 		}
+	}
+
+	fn expect_failure(input: &[u8], expected_error: Error) {
+		let mut cursor = io::Cursor::new(input);
+		let mut parser = Parser::new(&mut cursor);
+
+		let got = loop {
+			match parser.next_line() {
+				Ok(true) => {}, // more lines to go
+				Ok(false) => panic!("unexpectedly reached end of parse"),
+				Err(e) => break e,
+			}
+		};
+
+		assert_eq!(expected_error, got);
 	}
 }
 
