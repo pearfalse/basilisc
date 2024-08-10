@@ -34,16 +34,6 @@ impl fmt::Display for KeywordCtorError {
 ///   on if they are used as lvalues or not).
 /// - Whether or not the token is greedy (some keywords will be tokenised on match without needing
 ///   a trailing space or punctuation mark to denote its end).
-///
-/// For the sake of the lookup algorithm in the final crate, this struct defines its own ordering
-/// rules as:
-///
-/// - Lexical ordering of full keyword;
-/// - Token position;
-/// - Abbreviation length.
-///
-/// While this means that keywords cannot be stably sorted, no two keywords should ever be equal to
-/// each other in the final data.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Keyword {
 	byte: NonZeroU8,

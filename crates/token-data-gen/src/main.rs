@@ -1,14 +1,13 @@
 use std::{
 	fs,
 	io::{self, Write},
-	num::NonZeroU8,
 	path::{Path, PathBuf}
 };
 
 mod cooked_keyword;
 use cooked_keyword::Keyword;
 
-use basilisc_base::keyword::Prefix;
+use basilisc_base::keyword::{Prefix, TokenPosition};
 
 fn main() -> io::Result<()> {
 	// OUT_DIR
@@ -30,37 +29,17 @@ use basilisc_base::subarray::SubArray;
 /// The core type of the lookup tables.
 type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 
-"#)?; // TODO: there's no reason to have these be RawKeywords, there's no fallible conversion here
+"#)?;
 
-	// write arrays
-	macro_rules! write_array {
-		($var:ident) => {
-			_write_array(&mut gen_token_data, &*$var, stringify!($var),
-				"/// Token data for the direct map.")
-		};
-		($var:ident, $ind_prefix:literal) => {
-			_write_array(&mut gen_token_data, &*$var, stringify!($var),
-				concat!("/// Token data for the indirect map (prefix ",
-					stringify!($ind_prefix),
-					")."
-				)
-			)
-		}
-	}
-	write_array!(TOKEN_MAP_DIRECT)?;
-	write_array!(TOKEN_MAP_C6, 0xc6)?;
-	write_array!(TOKEN_MAP_C7, 0xc7)?;
-	write_array!(TOKEN_MAP_C8, 0xc8)?;
-
-	write_parse_map(&mut gen_token_data)?;
+	// Parse map == keyword-ordered array of keywords in combined maps
+	write_parse_map(&mut gen_token_data,
+		&[&TOKEN_MAP_DIRECT, &TOKEN_MAP_C6, &TOKEN_MAP_C7, &TOKEN_MAP_C8])?;
 
 
-	gen_token_data.sync_all()?;
-	return Ok(());
-
-	fn _write_array(file: &mut fs::File, arr: &'static [Keyword], name: &'static str,
-		doc_string: &'static str,
-	) -> io::Result<()> {
+	// Lookup map == byte-ordered arrays of keywords in separate maps
+	let file = &mut gen_token_data;
+	let mut docstring_buf = String::new();
+	let mut write_lookup_map = |data: &'static TokenMapData| -> io::Result<()> {
 		fn reduce_front<T>(mut slice: &[Option<T>]) -> (&[Option<T>], usize) {
 			let mut from = 0usize;
 			while let Some((None, x)) = slice.split_first() {
@@ -78,16 +57,26 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 
 		// for efficient storage, this needs to be sorted by token byte
 		let mut flat_arr: [Option<&'static Keyword>; 256] = [None; 256];
-		for kw in arr {
+		for kw in data.keywords() {
 			flat_arr[kw.byte().get() as usize] = Some(kw);
 		}
 
 		let (flat_arr, from) = reduce_front(&flat_arr[..]);
 		let flat_arr = reduce_back(flat_arr);
 
-		writeln!(file, "{}", doc_string)?;
+		let doc_string = {
+			use std::fmt::Write;
+			docstring_buf.clear();
+			match data.prefix.byte() {
+				Some(n) => write!(&mut docstring_buf, "indirect map (prefix {:02X})", n),
+				None => write!(&mut docstring_buf, "direct map")
+			}.expect("out of memory");
+			docstring_buf.as_str()
+		};
+
+		writeln!(file, "/// Token lookup data for the {}.", doc_string)?;
 		writeln!(file, "pub(crate) static {}: TokenDecodeMap = TokenDecodeMap::new(unsafe {{&[",
-			name)?;
+			data.name)?;
 		writeln!(file, "\t// SAFETY: valid arrays were generated at build time")?;
 		for (i, maybe_val) in flat_arr.iter().copied().enumerate() {
 			let i = i + from;
@@ -99,25 +88,24 @@ type TokenDecodeMap = SubArray<'static, Option<RawKeyword>>;
 			}
 		}
 		writeln!(file, "]}}, 0x{:02x});\n", from)
-	}
+	};
+
+	write_lookup_map(&TOKEN_MAP_DIRECT)?;
+	write_lookup_map(&TOKEN_MAP_C6)?;
+	write_lookup_map(&TOKEN_MAP_C7)?;
+	write_lookup_map(&TOKEN_MAP_C8)?;
+
+	gen_token_data.sync_all()
 }
 
-fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
+fn write_parse_map(file: &mut fs::File, maps: &[&'static TokenMapData]) -> io::Result<()> {
 	use std::fmt::Write as _;
 
 	let mut list: Vec<&'static Keyword>
-	= Vec::with_capacity(TOKEN_MAP_DIRECT.len()
-		+ TOKEN_MAP_C6.len() + TOKEN_MAP_C7.len() + TOKEN_MAP_C8.len());
+	= Vec::with_capacity(maps.iter().map(|tm| tm.keywords().len()).sum());
 
-	let baked_prefix: [(&'static [Keyword], Option<(NonZeroU8, Prefix)>); 4] = [
-		(&TOKEN_MAP_DIRECT, None),
-		(&TOKEN_MAP_C6, Some((NonZeroU8::new(0xc6).unwrap(), Prefix::C6))),
-		(&TOKEN_MAP_C7, Some((NonZeroU8::new(0xc7).unwrap(), Prefix::C7))),
-		(&TOKEN_MAP_C8, Some((NonZeroU8::new(0xc8).unwrap(), Prefix::C8))),
-	];
-
-	for (map, _prefix) in baked_prefix {
-		list.extend(map);
+	for map in maps.iter().copied() {
+		list.extend(map.keywords());
 	}
 
 	list.sort_unstable();
@@ -125,13 +113,11 @@ fn write_parse_map(file: &mut fs::File) -> io::Result<()> {
 	writeln!(file, r#"
 /// The lookup table used to convert an ASCII string of a keyword into its associated token data.
 ///
-/// The map is an array of sorted keywords (see [`Keyword`][K] for the actual sorting rules).
-///
-/// [K]: crate::cooked_keyword::Keyword
+/// The map is an array of sorted keywords (see [`RawKeyword`] for the actual sorting rules).
 pub(crate) static LOOKUP_MAP: [RawKeyword; {}] = unsafe {{["#,
 		list.len(),
 	)?;
-	writeln!(file, "// SAFETY: values are generated from the same parsed type at build time")?;
+	writeln!(file, "\t// SAFETY: values are generated from the same parsed type at build time")?;
 
 	// "XX+XX".len() === 5
 	let mut buf = arrayvec::ArrayString::<5>::new();
@@ -148,85 +134,110 @@ pub(crate) static LOOKUP_MAP: [RawKeyword; {}] = unsafe {{["#,
 			keyword.as_array(), &buf, keyword.keyword().as_str(), keyword.nvalue_msg())?;
 	}
 	writeln!(file, "]}};")?;
-
+	writeln!(file)?;
 	Ok(())
 }
 
-macro_rules! _token_greedy {
-	(nongreedy) => { $crate::cooked_keyword::Match::Nongreedy };
-	() => { $crate::cooked_keyword::Match::Greedy };
+
+struct TokenMapData {
+	list: std::sync::OnceLock<&'static [Keyword]>,
+	prefix: Prefix,
+	name: &'static str,
+	init_fn: fn() -> Vec<Keyword>,
 }
 
-macro_rules! _token_impl {
-	($prefix:ident, $byte:literal, $word:literal, $abbr:expr, $pos:ident, $greedy:expr) => {
-		match $crate::cooked_keyword::Keyword::try_new($byte, $word,
-			$abbr,
-			::basilisc_base::keyword::TokenPosition::$pos,
-			$greedy,
-			::basilisc_base::keyword::Prefix::$prefix)
-		{
-			Ok(x) => x,
-			Err(msg) => panic!("Failed to construct keyword: {}", msg)
+impl TokenMapData {
+	pub const fn new(name: &'static str, prefix: Prefix, init_fn: fn() -> Vec<Keyword>) -> Self {
+		Self {
+			list: std::sync::OnceLock::new(),
+			prefix,
+			name,
+			init_fn
 		}
+	}
+
+	/// Initialises the vec, returning the generated list.
+	///
+	/// # Panics
+	///
+	/// Panics if any token data is deemed invalid. This usually indicates a mistake in the
+	/// token table.
+	pub fn keywords(&self) -> &'static [Keyword] {
+		self.list.get_or_init(|| (self.init_fn)().leak())
+	}
+}
+
+fn token_impl_fn(
+	prefix: Prefix,
+	byte: u8,
+	word: &'static str,
+	min_abbrev: Option<core::num::NonZeroU8>,
+	position: basilisc_base::keyword::TokenPosition,
+	greedy: bool,
+	triggers_line_ref: bool,
+) -> Keyword {
+	match Keyword::try_new(byte, word, min_abbrev, position, greedy, triggers_line_ref, prefix) {
+		Ok(x) => x,
+		Err(msg) => panic!("Failed to construct keyword: {}", msg)
 	}
 }
 
 macro_rules! _token_once {
 	($prefix:ident, ($byte:expr, $word:literal, nongreedy))
-	=> {_token_impl!(
-		$prefix,
+	=> {$crate::token_impl_fn(
+		Prefix::$prefix,
 		$byte,
 		$word,
 		None,
-		Any,
+		TokenPosition::Any,
 		false
 	)};
 	($prefix:ident, ($byte:expr, $word:literal, abbr $abbr:literal, nongreedy))
-	=> {_token_impl!(
-		$prefix,
+	=> {$crate::token_impl_fn(
+		Prefix::$prefix,
 		$byte,
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
-		Any,
+		TokenPosition::Any,
 		false
 	)};
 
 	($prefix:ident, ($byte:expr, $word:literal))
-	=> {_token_impl!(
-		$prefix,
+	=> {$crate::token_impl_fn(
+		Prefix::$prefix,
 		$byte,
 		$word,
 		None,
-		Any,
+		TokenPosition::Any,
 		true
 	)};
 	($prefix:ident, ($byte:expr, $word:literal, abbr $abbr:literal))
-	=> {_token_impl!(
-		$prefix,
+	=> {$crate::token_impl_fn(
+		Prefix::$prefix,
 		$byte,
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
-		Any,
+		TokenPosition::Any,
 		true
 	)};
 	($prefix:ident, ($byte:expr, $word:literal, abbr $abbr:literal, pos $pos:ident, nongreedy))
-	=> {_token_impl!(
-		$prefix,
+	=> {$crate::token_impl_fn(
+		Prefix::$prefix,
 		$byte,
 		$word,
 		Some(::nonzero_ext::nonzero!($abbr as u8)),
-		$pos,
+		TokenPosition::$pos,
 		true
 	)};
 }
 
 macro_rules! token_map {
 	($name:ident, $prefix:ident, $( $groups:tt ,)*) => {
-		::lazy_static::lazy_static! {
-			static ref $name: &'static [$crate::cooked_keyword::Keyword] = vec![$(
-				_token_once!($prefix, $groups),
-			)*].leak();
-		}
+		static $name: TokenMapData = TokenMapData::new(
+			stringify!($name),
+			::basilisc_base::keyword::Prefix::$prefix,
+			|| vec![$(_token_once!($prefix, $groups),)*],
+		);
 	}
 }
 

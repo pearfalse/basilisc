@@ -1,6 +1,4 @@
 //! All compiled data `basilisc` knows about BASIC keywords.
-//!
-//! Most of the interesting data is generated from a high-level representation in `build.rs`.
 
 /// To generate the contents of this file, run `cargo run -p token-data-gen`.
 #[path = "../meta-src/token_data.rs"]
