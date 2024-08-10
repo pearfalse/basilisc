@@ -1,0 +1,20 @@
+name: Run unit tests
+
+on:
+  push:
+    branches: [ "trunk" ]
+  pull_request:
+    branches: [ "trunk" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Generate token data
+      run: cargo run -p token-data-gen
+    - name: Run tests
+      run: cargo test --verbose
