@@ -64,15 +64,15 @@ struct UnpackArgs {
 	help: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, PartialEq, thiserror::Error)]
 enum UnpackError {
 	#[error("{}", .0)]
-	Forwarded(unpack::UnpackError),
+	Forwarded(unpack::Error),
 	#[error("line reference found; rejecting program")]
 	DisallowedLineReference,
 }
 
-impl<T> From<T> for UnpackError where unpack::UnpackError: From<T> {
+impl<T> From<T> for UnpackError where unpack::Error: From<T> {
 	fn from(src: T) -> Self {
 		Self::Forwarded(src.into())
 	}
@@ -166,8 +166,9 @@ fn main() {
 	let result : Result<(), (&dyn Error, ExitCode)> = match args {
 		Command::Unpack(args) => run_unpack(args).map_err(|e| {
 			let exit_code = match e {
-				UnpackError::Forwarded(unpack::UnpackError::UnexpectedEof)
-				| UnpackError::Forwarded(unpack::UnpackError::IoError(_)) => ExitCode::IoError,
+				UnpackError::Forwarded(unpack::Error { kind: unpack::ErrorKind::UnexpectedEof, .. })
+				| UnpackError::Forwarded(unpack::Error { kind: unpack::ErrorKind::IoError(_), .. })
+					=> ExitCode::IoError,
 				_ => ExitCode::InvalidData,
 			};
 
@@ -206,6 +207,10 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 	let mut input_file;
 	let mut output_file;
 
+	fn wrap_io_error(ioe: io::Error) -> UnpackError {
+		UnpackError::from(unpack::ErrorKind::IoError(ioe))
+	}
+
 	// Set output io objects
 	let output: &mut dyn io::Write = match &*args.output_file {
 		"-" => {
@@ -214,7 +219,7 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 			&mut stdout_lock
 		},
 		path => {
-			output_file = fs::File::create(path)?;
+			output_file = fs::File::create(path).map_err(wrap_io_error)?;
 			&mut output_file
 		}
 	};
@@ -227,7 +232,7 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 			&mut stdin_lock
 		},
 		path => {
-			input_file = BufReader::new(fs::File::open(path)?);
+			input_file = BufReader::new(fs::File::open(path).map_err(wrap_io_error)?);
 			&mut input_file
 		},
 	};
@@ -252,10 +257,10 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 		match (args.use_line_numbers, parser.referenced_lines().get(line.line_number)) {
 			(UnpackLineNumbersOption::AlwaysShow, _) |
 			(UnpackLineNumbersOption::Minimal, true)
-				=> write!(output, "{:5}", line.line_number)?,
+				=> write!(output, "{:5}", line.line_number).map_err(wrap_io_error)?,
 
 			(UnpackLineNumbersOption::Minimal, false) if there_are_any_referenced_lines
-				=> output.write_all(&[32u8; 6][..])?,
+				=> output.write_all(&[32u8; 6][..]).map_err(wrap_io_error)?,
 
 			_ => {},
 		};
@@ -265,15 +270,13 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 			output.write_all(
 				char::from_risc_os_latin1(latin1_byte)
 				.encode_utf8(&mut utf8_buf)
-				.as_bytes()
-				)?;
+				.as_bytes())
+			.map_err(wrap_io_error)?;
 		}
-		writeln!(output)?;
+		writeln!(output).map_err(wrap_io_error)?;
 	}
 
-	output.flush()?;
-
-	Ok(())
+	output.flush().map_err(wrap_io_error)
 }
 
 fn run_pack(args: PackArgs) -> Result<(), PackError> {

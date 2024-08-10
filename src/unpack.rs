@@ -1,7 +1,7 @@
 //! Handles &FFB-to-text conversion.
 
 use core::convert::Infallible;
-use std::{io, fmt::Debug, mem};
+use std::{cell::Cell, fmt, io, mem};
 
 use crate::{
 	support::{ArrayVecExt, NextByte, PerLineBits},
@@ -33,8 +33,8 @@ impl Line {
 
 
 /// Contains all errors that `basilisc` could encounter when unpacking a file.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum UnpackError {
+#[derive(Debug, Error)]
+pub enum ErrorKind {
 	/// The input file ended mid-line, or without seeing the designated EOF marker
 	#[error("unexpected end of file")]
 	UnexpectedEof,
@@ -45,32 +45,82 @@ pub enum UnpackError {
 
 	/// I/O error occurred
 	#[error("io error: {0}")]
-	IoError(String),
+	IoError(io::Error),
 
 	/// Encountered invalid line number reference (65281 or higher)
 	#[error("invalid line number reference (must be less than 62580)")]
 	InvalidLineReference,
 }
 
-impl From<io::Error> for UnpackError {
-	fn from(e: io::Error) -> Self {
-		Self::IoError(e.to_string())
+/// Indicates an error when unpacking a tokenised BASIC file.
+#[derive(Debug, PartialEq)]
+pub struct Error {
+	line_number: u16,
+	pub kind: ErrorKind,
+}
+
+impl Error {
+	/// The (logical) line number at which the error occurred.
+	pub fn line_number(&self) -> Option<u16> {
+		if self.line_number < crate::line_numbers::LIMIT {
+			Some(self.line_number)
+		} else {
+			None
+		}
 	}
 }
 
-impl From<line_numbers::DecodeError> for UnpackError {
+impl fmt::Display for Error {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		fmt::Display::fmt(&self.kind, f)?;
+		if self.line_number < crate::line_numbers::LIMIT {
+			write!(f, " at line {}", self.line_number)
+		} else {
+			Ok(())
+		}
+	}
+}
+
+impl From<ErrorKind> for Error {
+	/// Converts an `ErrorKind` into an `Error`, giving up on having line number information.
+	fn from(kind: ErrorKind) -> Self {
+		Self { line_number: u16::MAX, kind }
+	}
+}
+
+
+impl From<io::Error> for ErrorKind {
+	fn from(e: io::Error) -> Self {
+		Self::IoError(e)
+	}
+}
+
+impl From<line_numbers::DecodeError> for ErrorKind {
 	fn from(_: line_numbers::DecodeError) -> Self {
 		Self::InvalidLineReference
 	}
 }
 
-impl From<Infallible> for UnpackError {
+impl From<Infallible> for ErrorKind {
 	fn from(e: Infallible) -> Self {
 		match e {}
 	}
 }
 
-type UnpackResult<T> = Result<T, UnpackError>;
+impl PartialEq for ErrorKind {
+	fn eq(&self, other: &Self) -> bool {
+		use ErrorKind::*;
+		match (self, other) {
+			(&UnexpectedEof, &UnexpectedEof) => true,
+			(&InvalidLineReference, &InvalidLineReference) => true,
+			(&UnexpectedByte(a), &UnexpectedByte(b)) => a == b,
+			_ => false,
+		}
+	}
+}
+
+type Result<T> = std::result::Result<T, Error>;
+type KindResult<T> = std::result::Result<T, ErrorKind>;
 type TokenLookup = Option<u8>;
 type ByteFlush = ArrayVec<u8, 5>; // decoded line number reference is the biggest
 type LineNumberStage = ArrayVec<u8, 2>; // don't need to stage the third byte
@@ -139,7 +189,7 @@ pub struct Parser<I: NextByte> {
 }
 
 impl<I: NextByte> Parser<I>
-where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
+where I: NextByte, ErrorKind: From<<I as NextByte>::Error> {
 	/// Constructs a new parser based on an I/O object.
 	pub fn new(inner: I) -> Self {
 		Self {
@@ -168,7 +218,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 	/// A return value of `Ok(None)` indicates that the intended EOF marker has been found. Upon
 	/// encountering this marker, further calls to this method will return `Ok(None)` without
 	/// attempting to read more bytes from the inner stream.
-	pub fn next_line(&mut self) -> UnpackResult<Option<Line>> {
+	pub fn next_line(&mut self) -> Result<Option<Line>> {
 		self.buffer.clear();
 		self.line_state = LineState::HaveNothing;
 
@@ -202,12 +252,18 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 				}
 				if self.line_ref.is_some() {
 					// unfinished line reference!
-					return Err(UnpackError::UnexpectedEof);
+					return Err(Error { kind: ErrorKind::UnexpectedEof, line_number: ln });
 				}
 				break ln;
 			}
 
-			let nb = self.inner.next_byte()?;
+			let self_line_number = Cell::new(u16::MAX);
+			let wrap_error = |kind| Error { line_number: self_line_number.get(), kind };
+
+			let nb = self.inner.next_byte().map_err(|ioe| Error {
+				line_number: self_line_number.get(),
+				kind: ioe.into(),
+			})?;
 
 			// what's the line state?
 			let (_, remaining_bytes) = match self.line_state {
@@ -216,8 +272,8 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 						self.line_state = LineState::Have0D;
 						continue;
 					},
-					Some(what) => return Err(UnpackError::UnexpectedByte(what)),
-					None => return Err(UnpackError::UnexpectedEof),
+					Some(what) => return Err(wrap_error(ErrorKind::UnexpectedByte(what))),
+					None => return Err(wrap_error(ErrorKind::UnexpectedEof)),
 				},
 				LineState::Have0D => match nb {
 					Some(0xff) => {
@@ -230,7 +286,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 						self.line_state = LineState::HaveHalfLineNumber(lh);
 						continue;
 					},
-					None => return Err(UnpackError::UnexpectedEof),
+					None => return Err(wrap_error(ErrorKind::UnexpectedEof)),
 				},
 				LineState::HaveHalfLineNumber(lh) => match nb {
 					Some(ll) => {
@@ -238,25 +294,26 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 						self.line_state = LineState::HaveFullLineNumber(lf);
 						continue;
 					},
-					None => return Err(UnpackError::UnexpectedEof),
+					None => return Err(wrap_error(ErrorKind::UnexpectedEof)),
 				},
 				LineState::HaveFullLineNumber(lf) => {
 					let len = match nb {
 						// retrieved 0 -- technically supported, kinda weird
-						Some(0) => {
+						Some(smol) if smol < 4 => {
 							self.line_state = LineState::HaveNothing;
 							continue;
 						},
 						// one was retrieved
 						Some(rem) => rem,
 						// EOF
-						None => return Err(UnpackError::UnexpectedEof),
+						None => return Err(wrap_error(ErrorKind::UnexpectedEof)),
 					};
 					self.line_state = LineState::InLine {
 						line_number: lf,
 						// the BASIC line header includes itself in its length
-						remaining_bytes: len.saturating_sub(4),
+						remaining_bytes: len - 4,
 					};
+					self_line_number.set(lf);
 					self.extant_lines.get_mut(lf).set();
 					continue;
 				},
@@ -267,10 +324,10 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 			*remaining_bytes -= 1;
 
 			// if here, we are in a line, with at least one more byte we can (and must) read
-			let next_byte = nb.ok_or(UnpackError::UnexpectedEof)?;
+			let next_byte = nb.ok_or(ErrorKind::UnexpectedEof).map_err(wrap_error)?;
 
 			// handle line number references
-			if self.update_line_ref(next_byte)? {
+			if self.update_line_ref(next_byte).map_err(wrap_error)? {
 				continue;
 			}
 
@@ -352,7 +409,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 		None // no ASCII byte to pass through
 	}
 
-	fn update_line_ref(&mut self, next_byte: u8) -> UnpackResult<bool> {
+	fn update_line_ref(&mut self, next_byte: u8) -> KindResult<bool> {
 		let ref_stage = match self.line_ref {
 			Some(ref mut stage) => stage,
 			None => return Ok(false)
@@ -393,7 +450,7 @@ where I: NextByte, UnpackError: From<<I as NextByte>::Error> {
 /// - `Err` values are coalesced into `None`.
 struct Peekable<I: NextByte> {
 	inner: I,
-	next: Result<Option<u8>, <I as NextByte>::Error>,
+	next: std::result::Result<Option<u8>, <I as NextByte>::Error>,
 }
 
 impl<I: NextByte> Peekable<I> {
@@ -416,16 +473,16 @@ impl<I: NextByte> Peekable<I> {
 impl<I: NextByte> NextByte for Peekable<I> {
 	type Error = I::Error;
 
-	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
+	fn next_byte(&mut self) -> std::result::Result<Option<u8>, Self::Error> {
 		mem::replace(&mut self.next, self.inner.next_byte())
 	}
 }
 
-impl<I: NextByte> Debug for Peekable<I> {
+impl<I: NextByte> fmt::Debug for Peekable<I> {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		struct NextFormat<'a, I: NextByte>(&'a Result<Option<u8>, <I as NextByte>::Error>);
+		struct NextFormat<'a, I: NextByte>(&'a std::result::Result<Option<u8>, <I as NextByte>::Error>);
 
-		impl<'a, I: NextByte> Debug for NextFormat<'a, I> {
+		impl<'a, I: NextByte> fmt::Debug for NextFormat<'a, I> {
 			fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 				match *self.0 {
 					Ok(Some(b)) => write!(f, "byte({:02x})", b),
@@ -493,7 +550,7 @@ mod test_support_structs {
 	impl<'a> NextByte for NbSlice<'a> {
 		type Error = core::convert::Infallible;
 
-		fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
+		fn next_byte(&mut self) -> std::result::Result<Option<u8>, Self::Error> {
 			Ok(if let Some((first, rest)) = self.slice.split_first() {
 				self.slice = rest;
 				Some(*first)
@@ -563,7 +620,7 @@ mod test_parser {
 	impl<I: Iterator<Item = u8>> NextByte for InMemoryBytes<I> {
 		type Error = Infallible;
 
-		fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
+		fn next_byte(&mut self) -> std::result::Result<Option<u8>, Self::Error> {
 			Ok(self.0.next())
 		}
 	}
@@ -580,12 +637,11 @@ mod test_parser {
 		assert_eq!(expected, result.as_ref().map(|line| &*line.data).unwrap_or_default());
 	}
 
-	fn expand_err(expected: UnpackError, src: &[u8]) {
+	fn expand_err(expected: ErrorKind, src: &[u8]) {
 		let mut parser = expand_core(src);
 		let result = parser.next_line();
-		assert_eq!(Some(&expected), result.as_ref().err(),
-			"somehow parsed: {:02x?}", result.as_ref().ok().unwrap()
-			.as_ref().map(|line| &*line.data));
+		assert_eq!(Some(&expected), result.as_ref().err().map(|e| &e.kind),
+			"somehow parsed: {:02x?}", result.as_ref().ok());
 	}
 
 	#[test]
@@ -686,11 +742,11 @@ mod test_parser {
 	#[test]
 	fn bad_line_number() {
 		eprintln!("case 1");
-		expand_err(UnpackError::UnexpectedEof, b"\r\0\x0a\x06\x8dT");
+		expand_err(ErrorKind::UnexpectedEof, b"\r\0\x0a\x06\x8dT");
 		eprintln!("case 2");
-		expand_err(UnpackError::UnexpectedEof, b"\r\0\x0a\x07\x8dTJ");
+		expand_err(ErrorKind::UnexpectedEof, b"\r\0\x0a\x07\x8dTJ");
 		eprintln!("case 3");
-		expand_err(UnpackError::InvalidLineReference, b"\r\0\x0a\x09\xe5\x8d\x18\0?");
+		expand_err(ErrorKind::InvalidLineReference, b"\r\0\x0a\x09\xe5\x8d\x18\0?");
 	}
 
 	#[test]
