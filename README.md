@@ -6,8 +6,7 @@ Basilisc is a converter for BBC BASIC files that can convert between plaintext a
 - Handles line numbers and line number references properly.
 - Only prints line numbers for lines that are referenced (or for all lines, if you prefer). Can pack textual BASIC files with full, partial, or no line number definitions.
 - Properly converts non-ASCII characters in string literals and C0 control codes to printable Unicode characters, and back again.
-- Correctly unpacks squashed BASIC files without corrupting tokens by adding in spaces where they're needed.
-- If adding in those spaces made the line too long to re-pack, it will remove those spaces again.
+- Correctly unpacks squashed BASIC files without corrupting tokens by adding in spaces where they're needed. (If adding in those spaces made the line too long to re-pack, it will remove those spaces on packing.)
 
 Basilisc is still in development, and may fail on some extra-weird BASIC files. Please open an issue if you notice something it does wrong.
 
