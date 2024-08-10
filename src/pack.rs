@@ -371,8 +371,8 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Writes the converted BASIC file to the given I/O object.
-	pub fn write(self, target: &mut dyn io::Write) -> Result<()> {
-		let lines = self.into_lines()?;
+	pub fn write(self, target: &mut dyn io::Write, line_increment: Option<u16>) -> Result<()> {
+		let lines = self.into_lines(line_increment)?;
 
 		let ln = std::cell::Cell::new(0u32);
 		let wrap_error = |ioe| Error {
@@ -390,10 +390,10 @@ impl<'a> Parser<'a> {
 		Ok(())
 	}
 
-	fn into_lines(mut self) -> Result<Vec<Line>> {
+	fn into_lines(mut self, requested_increment: Option<u16>) -> Result<Vec<Line>> {
 		for gap in FindGaps::within(&mut self.lines).collect::<Vec<Gap>>() {
 			let to_apply = infer_line_number_range(gap.before, gap.after,
-				gap.lines.len().try_into().unwrap())?;
+				gap.lines.len().try_into().unwrap(), requested_increment)?;
 
 			for (ln, target) in to_apply.zip(gap.lines.iter_mut()) {
 				target.line_number = Some(ln);
@@ -630,7 +630,7 @@ mod test_parser {
 		}
 
 		if set_numbers {
-			check!(parser.into_lines().unwrap(), core::convert::identity);
+			check!(parser.into_lines(None).unwrap(), core::convert::identity);
 		} else {
 			check!(parser.lines, ::std::option::Option::Some);
 		}
@@ -711,7 +711,8 @@ static INFERENCE_ALIGNMENT_TRIES: [(u16, NonZeroU16); 4] = [
 /// works.
 /// This algorithm can fail if there is no room to add a unique number to every line requested;
 /// `basilisc` does not renumber a program.
-fn infer_line_number_range(line_before: Option<u16>, line_after: Option<u16>, num_lines: u16)
+fn infer_line_number_range(line_before: Option<u16>, line_after: Option<u16>, num_lines: u16,
+	requested_alignment: Option<u16>)
 -> Result<Range> {
 	// we can flatten line_after immediately, but line_before has to wait
 	//  (can't go below 0, which is a number we can't pre-reserve as a dummy line_before)
@@ -728,7 +729,8 @@ fn infer_line_number_range(line_before: Option<u16>, line_after: Option<u16>, nu
 	}
 
 	// try various heuristics, in very subjective order of niceness
-	for (align, step) in INFERENCE_ALIGNMENT_TRIES {
+	let request = requested_alignment.and_then(NonZeroU16::new).map(|a| (a.get(), a));
+	for (align, step) in request.into_iter().chain(INFERENCE_ALIGNMENT_TRIES) {
 		let line_before = line_before.unwrap_or_else(|| match step.get() {
 			1 => 0,
 			_ => 1,
@@ -775,7 +777,7 @@ mod test_line_number_inference {
 		fn case(exp_start: u16, exp_step: u16, line_before: u16, line_after: u16, num_lines: u16) {
 			let expected = Range::new(exp_start, NonZeroU16::new(exp_step).unwrap());
 			assert_eq!(Ok(expected), infer_line_number_range(
-				Some(line_before), Some(line_after), num_lines));
+				Some(line_before), Some(line_after), num_lines, None));
 		}
 		case(10, 10, 5, 110, 10);
 		case(5, 10, 4, 26, 3);
@@ -784,18 +786,18 @@ mod test_line_number_inference {
 
 	#[test]
 	fn absolute_spacious() {
-		assert_eq!(range(10, 10), infer_line_number_range(Some(5), Some(2000), 5));
+		assert_eq!(range(10, 10), infer_line_number_range(Some(5), Some(2000), 5, None));
 	}
 
 	#[test]
 	fn unnumbered_start() {
-		assert_eq!(range(10, 10), infer_line_number_range(None, Some(200), 19));
+		assert_eq!(range(10, 10), infer_line_number_range(None, Some(200), 19, None));
 	}
 
 	#[test]
 	fn full_program() {
 		for num_lines in [1, 100, 0x197f /* this * 10 + 10 == 0xff00 */, 0] {
-			assert_eq!(range(10, 10), infer_line_number_range(None, None, num_lines));
+			assert_eq!(range(10, 10), infer_line_number_range(None, None, num_lines, None));
 		}
 	}
 
@@ -810,7 +812,7 @@ mod test_line_number_inference {
 					line_number: u32::MAX,
 					kind: ErrorKind::TooManyUnnumberedLines { max_possible, needed }
 				}),
-				infer_line_number_range(line_before, line_after, num_lines)
+				infer_line_number_range(line_before, line_after, num_lines, None)
 			);
 		}
 
@@ -823,8 +825,8 @@ mod test_line_number_inference {
 	#[test]
 	fn arith_overflow_checks() {
 		// highest one with reasonable integers
-		assert!(infer_line_number_range(Some(0xfefe), Some(0xfeff), 0xff00).is_err());
+		assert!(infer_line_number_range(Some(0xfefe), Some(0xfeff), 0xff00, None).is_err());
 		// MORE
-		assert!(infer_line_number_range(Some(u16::MAX - 1), Some(u16::MAX), u16::MAX).is_err());
+		assert!(infer_line_number_range(Some(u16::MAX - 1), Some(u16::MAX), u16::MAX, None).is_err());
 	}
 }

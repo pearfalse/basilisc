@@ -45,6 +45,11 @@ struct PackArgs {
 		long = "output", meta = "<path or `-`>")]
 	output_file: String,
 
+	#[options(help = "request an increment amount for automatic line numbers",
+		meta = "<integer above zero>",
+		long = "increment", no_short)]
+	line_number_increment: Option<u16>,
+
 	#[options(help = "show help for this command")]
 	help: bool,
 }
@@ -326,6 +331,6 @@ fn run_pack(args: PackArgs) -> Result<(), PackError> {
 	let mut parser = pack::Parser::new(input);
 	while parser.next_line()? { }
 
-	parser.write(output)?;
+	parser.write(output, args.line_number_increment)?;
 	Ok(())
 }
