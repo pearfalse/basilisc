@@ -12,6 +12,29 @@ Basilisc is still in development, and may fail on some extra-weird BASIC files. 
 
 There is no \[deliberate\] support for post-Acorn BASIC files. I'm not opposed to supporting them, I just have no use case for it myself.
 
+## Usage
+
+To unpack a tokenised BASIC file:
+
+<code>basilisc unpack -i path/to/basic/file,ffb -o path/to/text/version.txt</code>
+
+The output will be a UTF-8 text file with LF line endings with the full program listing. Line numbers are only included for any lines referenced with a `GOTO` or `GOSUB`; if you want all lines to have their line numbers included, add the argument `--use-line-numbers=always` to the command. Non-printing and non-ASCII characters are preserved with a lossless mapping to printing Unicode characters.
+
+To convert the other way:
+
+<code>basilisc pack -i path/to/text/version.txt -o path/to/basic/file,ffb</code>
+
+The output will be a tokenised BASIC file ready to use on any version of BBC BASIC.
+
+For more help on available command options, run `basilisc pack --help` or `basilisc unpack --help`.
+
+## Round-trip conversion
+
+Basilisc is designed to support round-trip conversion, with as close to a byte-for-byte preservation as is reasonably possible. Reasons for discrepancies might include:
+
+- The `unpack` command didn't ask for all line numbers, or some were removed from the text version, and Basilisc filled in different numbers.
+- The tokenised BASIC file was squashed, which often removes space characters that need to be present in text versions of the same code. Basilisc will add those in when `unpack`-ing anywhere it needs to. It'll only remove them again if that's what it takes to bring a long line under the hard limit of 251 bytes.
+
 ## Building from source
 
 To generate a release binary from source:
