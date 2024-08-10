@@ -37,10 +37,12 @@ enum Command {
 #[derive(Debug, Options)]
 struct PackArgs {
 
-	#[options(help = "ASCII input file to encode", required)]
+	#[options(help = "ASCII input file to encode (or `-` for stdin)", required,
+		long = "input", meta = "<path or `-`>")]
 	input_file: String,
 
-	#[options(help = "output BASIC file", required)]
+	#[options(help = "output BASIC file (or `-` for stdout)", required,
+		long = "output", meta = "<path or `-`>")]
 	output_file: String,
 
 	#[options(help = "show help for this command")]
@@ -50,14 +52,17 @@ struct PackArgs {
 #[derive(Debug, Options)]
 struct UnpackArgs {
 
-	#[options(help = "BASIC file to decode", required)]
+	#[options(help = "BASIC file to decode (or `-` for stdin)", required,
+		long = "input", meta = "<path or `-`>")]
 	input_file: String,
 
-	#[options(help = "output ASCII file", required)]
+	#[options(help = "output ASCII file (or `-` for stdout)", required,
+		long = "output", meta = "<path or `-`>")]
 	output_file: String,
 
-	#[options(help = "use of line numbers in output (minimal, always, forbid)",
+	#[options(help = "use of line numbers in output",
 		default = "minimal",
+		meta = "minimal/always/forbid",
 		parse(try_from_str = "UnpackLineNumbersOption::try_parse"),
 		)]
 	use_line_numbers: UnpackLineNumbersOption,
