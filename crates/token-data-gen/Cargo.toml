@@ -8,5 +8,4 @@ authors.workspace = true
 arrayvec = { workspace = true }
 ascii = { workspace = true }
 basilisc-base = { path = "../basilisc-base" }
-lazy_static = "1.4"
 nonzero_ext = { workspace = true }
