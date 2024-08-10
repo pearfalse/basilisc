@@ -1,3 +1,5 @@
+//! Data types common to both packing and unpacking.
+
 /// State machine for tracking whether the parse is in a string literal.
 ///
 /// In unpacking, this controls escaping of literal " chars (U+0022), as well as how high-bit-set

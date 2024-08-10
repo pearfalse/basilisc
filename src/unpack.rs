@@ -167,8 +167,6 @@ pub struct Parser<I: NextByte> {
 	have_reached_end: bool,
 	/// Are we in a string literal? (if so, don't expand tokens)
 	string_state: StringState,
-	/// Which lines exist?
-	extant_lines: PerLineBits,
 	/// Which lines are referenced?
 	referenced_lines: PerLineBits,
 }
@@ -187,13 +185,9 @@ where I: NextByte, ErrorKind: From<<I as NextByte>::Error> {
 			cur_token: KeywordIter2::default(),
 			have_reached_end: false,
 			string_state: StringState::default(),
-			extant_lines: PerLineBits::new(),
 			referenced_lines: PerLineBits::new(),
 		}
 	}
-
-	/// Returns a bit set tracking which lines exist in the file.
-	pub(crate) fn extant_lines(&self) -> &PerLineBits { &self.extant_lines }
 
 	/// Returns a bit set tracking which lines have been referenced in `GOTO`/`GOSUB` statements.
 	pub(crate) fn referenced_lines(&self) -> &PerLineBits { &self.referenced_lines }
@@ -299,7 +293,6 @@ where I: NextByte, ErrorKind: From<<I as NextByte>::Error> {
 						remaining_bytes: len - 4,
 					};
 					self_line_number.set(lf);
-					self.extant_lines.get_mut(lf).set();
 					continue;
 				},
 				LineState::InLine { line_number, ref mut remaining_bytes }
@@ -735,7 +728,7 @@ mod test_parser {
 	}
 
 	#[test]
-	fn extant_referenced_lines() {
+	fn referenced_lines() {
 		let mut sut = Parser::new([
 			13, 0, 10, 5,  0xf4,
 			13, 0, 20, 9,  0xe5, 0x8d, 0x54, 0x5e, 0x40,
@@ -750,10 +743,7 @@ mod test_parser {
 			assert_eq!(line_number, line.line_number);
 			assert_eq!(content, &*line.data, "got {:02x?}", &*line.data);
 		}
-		assert!(sut.extant_lines.get(10));
-		assert!(sut.extant_lines.get(20));
 		assert!(sut.referenced_lines.get(30));
-		assert!(!sut.extant_lines.get(1));
 		assert!(!sut.referenced_lines.get(20));
 	}
 
