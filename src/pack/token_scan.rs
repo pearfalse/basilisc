@@ -20,7 +20,6 @@ pub(super) type CharBuffer = ArrayVec<u8, { basilisc_base::keyword::MAX_LEN as u
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Error {
 	InvalidLineRef { after: u8 },
-	MissingLineRef { after: u8 },
 }
 
 impl Error {
@@ -153,8 +152,10 @@ impl TokenScanner {
 				self.line_ref = LineRefState::Building { kw_byte, stage: (ch - b'0') as u16 };
 				return Ok(()); // do nothing else with this byte
 			}
-			LineRefState::Expecting { kw_byte } // some unexpected character
-				=> return Err(Error::MissingLineRef { after: kw_byte }),
+			LineRefState::Expecting { kw_byte: _ } => {
+				// some unexpected character. oh well, no line reference anymore
+				self.line_ref = LineRefState::No;
+			}
 			LineRefState::Building { kw_byte, ref mut stage } if ch_is_digit => {
 				let new_line_ref = (*stage as u32) * 10 + (ch - b'0') as u32;
 				if new_line_ref >= line_numbers::LIMIT as u32 {
@@ -227,9 +228,8 @@ impl TokenScanner {
 
 		match self.line_ref {
 			LineRefState::No => { } // no problem
-			LineRefState::Expecting { kw_byte } => {
-				// uh oh, we were expecting a line reference here
-				return Err(Error::MissingLineRef { after: kw_byte });
+			LineRefState::Expecting { kw_byte: _ } => {
+				// we were expecting a line reference here. oh well
 			}
 			LineRefState::Building { kw_byte, stage } => {
 				// line finished with a line ref decimal byte. ok!
@@ -609,17 +609,8 @@ mod tests {
 		assert_output(b"GOTO 10 and then do sth else", b"\xe5 \x8dTJ@ and then do sth else");
 		assert_output(b"finally, GOSUB 0", b"finally, \xe4 \x8dT@@");
 
-		for followed_by in [None, Some(b' '), Some(b'x'), Some(b':')] {
-			let mut buf = ArrayVec::<u8, 6>::new();
-			buf.try_extend_from_slice(b"GOTO").unwrap();
-			if let Some(b) = followed_by { buf.push(b); }
-			assert_error(&*buf, Error::MissingLineRef { after: 0xe5 });
-
-			buf.clear();
-			buf.try_extend_from_slice(b"GOSUB").unwrap();
-			if let Some(b) = followed_by { buf.push(b); }
-			assert_error(&*buf, Error::MissingLineRef { after: 0xe4 });
-		}
+		assert_error(b"GOTO66666", Error::InvalidLineRef { after: 0xe5 });
+		assert_error(b"GOSUB 99999", Error::InvalidLineRef { after: 0xe4 });
 	}
 
 	#[track_caller]

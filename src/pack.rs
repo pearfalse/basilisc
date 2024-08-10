@@ -50,10 +50,6 @@ pub enum Error {
 	#[error("character '{}' has no RISC OS Latin-1 equivalent", (.0).escape_unicode())]
 	NoLatin1Char(char),
 
-	/// Source file contained a GOTO/GOSUB and failed to include a line number after it.
-	#[error("missing line number after {}", .0)]
-	MissingLineReference(&'static ascii::AsciiStr),
-
 	/// Source file contained a GOTO/GOSUB with a line number out of range.
 	#[error("invalid line number after {}", .0)]
 	InvalidLineReference(&'static ascii::AsciiStr),
@@ -72,8 +68,6 @@ impl From<std::convert::Infallible> for Error {
 impl From<token_scan::Error> for Error {
 	fn from(inner: token_scan::Error) -> Self {
 		match inner {
-			token_scan::Error::MissingLineRef { after }
-				=> Self::MissingLineReference(token_scan::Error::lookup(after)),
 			token_scan::Error::InvalidLineRef { after }
 				=> Self::InvalidLineReference(token_scan::Error::lookup(after)),
 		}
@@ -104,7 +98,7 @@ impl PartialEq for Error {
 				&NoLatin1Char(a), &NoLatin1Char(b),
 			) => a == b,
 			(
-				&MissingLineReference(a), &MissingLineReference(b)
+				&InvalidLineReference(a), &InvalidLineReference(b)
 			) => *a == *b,
 			_ => false,
 		}
