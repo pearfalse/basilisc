@@ -67,6 +67,7 @@ struct UnpackArgs {
 
 	#[options(help = "use of line numbers in output",
 		default = "minimal",
+		no_short,
 		meta = "minimal/always/forbid",
 		parse(try_from_str = "UnpackLineNumbersOption::try_parse"),
 		)]
