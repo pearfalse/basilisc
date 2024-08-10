@@ -154,7 +154,7 @@ impl TokenScanner {
 				return Ok(()); // do nothing else with this byte
 			}
 			LineRefState::Expecting { kw_byte } // some unexpected character
-				=> return Err(Error::InvalidLineRef { after: kw_byte }),
+				=> return Err(Error::MissingLineRef { after: kw_byte }),
 			LineRefState::Building { kw_byte, ref mut stage } if ch_is_digit => {
 				let new_line_ref = (*stage as u32) * 10 + (ch - b'0') as u32;
 				if new_line_ref >= line_numbers::LIMIT as u32 {
@@ -608,11 +608,26 @@ mod tests {
 		assert_output(b"GOTO 600", b"\xe5 \x8dDXB");
 		assert_output(b"GOTO 10 and then do sth else", b"\xe5 \x8dTJ@ and then do sth else");
 		assert_output(b"finally, GOSUB 0", b"finally, \xe4 \x8dT@@");
+
+		for followed_by in [None, Some(b' '), Some(b'x'), Some(b':')] {
+			let mut buf = ArrayVec::<u8, 6>::new();
+			buf.try_extend_from_slice(b"GOTO").unwrap();
+			if let Some(b) = followed_by { buf.push(b); }
+			assert_error(&*buf, Error::MissingLineRef { after: 0xe5 });
+
+			buf.clear();
+			buf.try_extend_from_slice(b"GOSUB").unwrap();
+			if let Some(b) = followed_by { buf.push(b); }
+			assert_error(&*buf, Error::MissingLineRef { after: 0xe4 });
+		}
 	}
 
 	#[track_caller]
 	fn assert_output(input: &[u8], output: &[u8]) {
-		let got = _inout(input);
+		let got = match _inout(input) {
+			Ok(v) => v,
+			Err(e) => panic!("token scan failed\nunexpected error: {:?}", e),
+		};
 
 		if &*got != output {
 			panic!("token scan failed\n\nexpected `{}`\nbut got: `{}`\n",
@@ -620,7 +635,19 @@ mod tests {
 		}
 	}
 
-	fn _inout(src: &[u8]) -> Vec<u8> {
+	#[track_caller]
+	fn assert_error(input: &[u8], error: Error) {
+		let got = match _inout(input) {
+			Ok(v) => panic!("token scan failed\nunexpected success: {:?}", v),
+			Err(e) => e,
+		};
+
+		if got != error {
+			panic!("token scan failed\n\nexpected error `{:?}`\nbut got: `{:?}`\n", error, got);
+		}
+	}
+
+	fn _inout(src: &[u8]) -> Result<Vec<u8>, Error> {
 		if let Ok(s) = ascii::AsAsciiStr::as_ascii_str(src) {
 			println!("src: {}", s);
 		} else {
@@ -630,7 +657,7 @@ mod tests {
 		let mut out_buf = Vec::with_capacity(src.len());
 
 		for &ch in src {
-			scanner.push(ch).unwrap();
+			scanner.push(ch)?;
 			loop {
 				match scanner.try_pull() {
 					Some(b) => out_buf.push(b),
@@ -638,10 +665,10 @@ mod tests {
 				}
 			}
 		}
-		scanner.flush().unwrap();
+		scanner.flush()?;
 		while let Some(b) = scanner.try_pull() {
 			out_buf.push(b);
 		}
-		out_buf
+		Ok(out_buf)
 	}
 }

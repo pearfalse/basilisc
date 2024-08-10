@@ -437,6 +437,14 @@ mod test_parser {
 			], true);
 	}
 
+	#[test]
+	fn goto_gosub() {
+		expect_success(b"10GOTO20",
+			&[(10, b"\xe5\x8dTT@")], false);
+		expect_success(b"10GOTO20:PRINT\"never print this\"",
+			&[(10, b"\xe5\x8dTT@:\xf1\"never print this\"")], false);
+	}
+
 	fn expect_success(input: &[u8], output: &[(u16, &[u8])], set_numbers: bool) {
 		let mut cursor = io::Cursor::new(input);
 		let mut parser = Parser::new(&mut cursor);
@@ -457,7 +465,7 @@ mod test_parser {
 				for (line, (exp_line_number, exp_line_contents))
 				in $search.into_iter().zip(output.iter().copied()) {
 					assert_eq!($proc_line_number(exp_line_number), line.line_number);
-					assert_eq!(exp_line_contents, &*line.contents);
+					::assert_hex::assert_eq_hex!(exp_line_contents, &*line.contents);
 				}
 			};
 		}
