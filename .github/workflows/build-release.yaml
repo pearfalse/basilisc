@@ -1,0 +1,22 @@
+name: Build release binaries
+
+on: workflow_dispatch
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare_repo:
+    name: Create release binary
+    runs-on: macos12
+    steps:
+    - uses: actions/checkout@v4
+    - name: Generate token data
+      run: cargo run -p token-data-gen
+    - name: Build release binary
+      run: cargo build --release
+    - name: Export build assets
+      uses: actions/upload-artifact@v4
+      with:
+        name: basilisc-monterey.zip
+        path: ./target/release/basilisc
