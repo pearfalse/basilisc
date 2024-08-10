@@ -175,7 +175,7 @@ type KindResult<T> = ::std::result::Result<T, ErrorKind>;
 /// The core structure for encoding a BASIC file.
 #[derive(Debug)]
 pub struct Parser<'a> {
-	buf: ArrayVec<u8, MAX_LINE_LEN>,
+	buf: Box<ArrayVec<u8, MAX_LINE_LEN>>,
 	lines: Vec<UnnumberedLine>,
 	token_scan: TokenScanner,
 	inner: ByteDecoder<'a>,
@@ -186,7 +186,7 @@ impl<'a> Parser<'a> {
 	/// Constructs a new parser.
 	pub fn new(src: IoObject<'a>) -> Self {
 		Self {
-			buf: ArrayVec::new(),
+			buf: Box::new(ArrayVec::new()),
 			lines: Vec::new(),
 			token_scan: TokenScanner::new(),
 			inner: ByteDecoder::new(src),
@@ -212,7 +212,7 @@ impl<'a> Parser<'a> {
 		if let Some(maybe_ln) = self.raw_line()? {
 			self.lines.push(UnnumberedLine {
 				line_number: maybe_ln,
-				contents: (&*self.buf).into(),
+				contents: (&**self.buf).into(),
 			});
 		} else {
 			self.is_eof = true;
