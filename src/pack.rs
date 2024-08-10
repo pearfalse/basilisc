@@ -62,8 +62,17 @@ pub enum ErrorKind {
 /// Struct for errors that can occur when encoding a text file.
 #[derive(Debug, PartialEq)]
 pub struct Error {
-	pub line_number: u32,
+	line_number: u32,
 	pub kind: ErrorKind,
+}
+
+impl Error {
+	/// Returns the line number that this error occurred on, if known.
+	///
+	/// Keep in mind that this is the 1-indexed line of the _text_ file, _not_ the BASIC line number.
+	pub fn line_number(&self) -> Option<u32> {
+		Some(self.line_number).filter(|&n| n != u32::MAX)
+	}
 }
 
 impl fmt::Display for Error {

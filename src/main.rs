@@ -175,7 +175,7 @@ fn main() {
 		}),
 		Command::Pack(args) => run_pack(args).map_err(|e| {
 			let exit_code = match e {
-				PackError { line_number: _, kind: pack::ErrorKind::IoError(_) }
+				PackError { kind: pack::ErrorKind::IoError(_), .. }
 					=> ExitCode::IoError,
 				_ => ExitCode::InvalidData,
 			};
