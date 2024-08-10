@@ -7,6 +7,7 @@ use crate::{
 	support::{ArrayVecExt, NextByte, PerLineBits},
 	token_data,
 	line_numbers,
+	common::StringState,
 };
 
 use basilisc_base::keyword;
@@ -142,22 +143,6 @@ enum LineState {
 		line_number: u16,
 		remaining_bytes: u8,
 	},
-}
-
-
-/// State machine for tracking whether the parse is in a string literal. This controls escaping
-/// of literal " chars (U+0022), as well as how high-bit-set bytes are interpreted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum StringState {
-	/// Not currently in a string literal
-	#[default]
-	NotInString,
-
-	/// Currently in a string literal
-	InString,
-
-	/// Hovering over a closing quote mark (a second one indicates an escaped U+0022)
-	MaybeClosed,
 }
 
 

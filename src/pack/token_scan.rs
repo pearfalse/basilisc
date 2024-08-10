@@ -9,6 +9,7 @@ use std::{fmt, mem};
 
 use arrayvec::ArrayVec;
 
+use crate::common::StringState;
 use crate::line_numbers;
 use crate::support::{ArrayVecExt, HexArray};
 
@@ -44,6 +45,7 @@ pub(super) struct TokenScanner {
 	is_lhs: bool,
 	else_hack: ElseHack,
 	line_ref: LineRefState,
+	string_state: StringState,
 }
 
 static PINCH_ALL: &[RawKeyword] = crate::token_data::LOOKUP_MAP.as_slice();
@@ -102,6 +104,7 @@ impl TokenScanner {
 			is_lhs: true,
 			else_hack: ElseHack::default(),
 			line_ref: LineRefState::No,
+			string_state: StringState::NotInString,
 		}
 	}
 
@@ -115,6 +118,22 @@ impl TokenScanner {
 
 	/// Pushes a new byte (a RISC OS Latin-1 char) into the scanner.
 	pub fn push(&mut self, ch: u8) -> Result<(), Error> {
+		self.string_state.update_state(ch);
+
+		match self.string_state {
+			StringState::NotInString => {}, // proceed to the rest of the logic
+			StringState::InString | StringState::MaybeClosed => {
+				// we either:
+				// - are still in a string, and should just dump this character out as-is
+				// - just closed a string literal, and should output this quote mark
+				// - are in '"' 1 of 2 for an escape, but the second will be suppressed
+				//   so just output this one
+				self.char_out_buf.push(ch);
+				return Ok(());
+			}
+
+		}
+
 		macro_rules! set_lhs {
 			(char) => { self.is_lhs = ch == b':'; };
 		}
@@ -476,6 +495,22 @@ impl fmt::Debug for TokenScanner {
 }
 
 
+impl StringState {
+	fn update_state(&mut self, ch: u8) {
+		if ch == b'"' {
+			*self = match *self {
+				// open string, or complete escaping
+				Self::NotInString => Self::InString, // entered string, output quote mark
+				Self::InString => Self::MaybeClosed, // probably left string
+				Self::MaybeClosed => Self::InString // nope, completed escape
+			}
+		} else if *self == Self::MaybeClosed {
+			// definitely closed, if we didn't get another quote mark to escape the first
+			*self = Self::NotInString;
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -611,6 +646,15 @@ mod tests {
 
 		assert_error(b"GOTO66666", Error::InvalidLineRef { after: 0xe5 });
 		assert_error(b"GOSUB 99999", Error::InvalidLineRef { after: 0xe4 });
+	}
+
+	#[test]
+	fn no_tokenising_string_literals() {
+		const LITERAL: &'static [u8] = b"\"LEAVE ME ALONE\"";
+		assert_output(LITERAL, LITERAL);
+
+		const LITERAL_WITH_ESCAPED_QUOTES: &'static [u8] = b"\"I AM ALSO \"\"ON\"\" FIRE\"";
+		assert_output(LITERAL_WITH_ESCAPED_QUOTES, LITERAL_WITH_ESCAPED_QUOTES);
 	}
 
 	#[track_caller]

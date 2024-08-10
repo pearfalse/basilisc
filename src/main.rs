@@ -13,6 +13,8 @@ pub mod latin1;
 pub mod unpack;
 pub mod pack;
 
+pub(crate) mod common;
+
 #[cfg(doc)]
 pub use basilisc_base::keyword;
 
