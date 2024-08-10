@@ -257,6 +257,12 @@ impl RawKeyword {
 		self.flags & flags::GREEDY != 0
 	}
 
+	/// Returns `true` if the presence of this token indicates expectation of a line reference.
+	#[inline]
+	pub const fn triggers_line_ref(&self) -> bool {
+		self.flags & flags::TRIGGERS_LINE_REF != 0
+	}
+
 	/// Iterates over the contents of the keyword.
 	pub fn iter(&self) -> Iter<'_> {
 		Iter::new(self)

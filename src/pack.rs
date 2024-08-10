@@ -50,6 +50,14 @@ pub enum Error {
 	#[error("character '{}' has no RISC OS Latin-1 equivalent", (.0).escape_unicode())]
 	NoLatin1Char(char),
 
+	/// Source file contained a GOTO/GOSUB and failed to include a line number after it.
+	#[error("missing line number after {}", .0)]
+	MissingLineReference(&'static ascii::AsciiStr),
+
+	/// Source file contained a GOTO/GOSUB with a line number out of range.
+	#[error("invalid line number after {}", .0)]
+	InvalidLineReference(&'static ascii::AsciiStr),
+
 	/// I/O error.
 	#[error("I/O error: {0}")]
 	IoError(#[from] std::io::Error),
@@ -58,6 +66,17 @@ pub enum Error {
 impl From<std::convert::Infallible> for Error {
 	fn from(src: std::convert::Infallible) -> Self {
 		match src { }
+	}
+}
+
+impl From<token_scan::Error> for Error {
+	fn from(inner: token_scan::Error) -> Self {
+		match inner {
+			token_scan::Error::MissingLineRef { after }
+				=> Self::MissingLineReference(token_scan::Error::lookup(after)),
+			token_scan::Error::InvalidLineRef { after }
+				=> Self::InvalidLineReference(token_scan::Error::lookup(after)),
+		}
 	}
 }
 
@@ -84,6 +103,9 @@ impl PartialEq for Error {
 			(
 				&NoLatin1Char(a), &NoLatin1Char(b),
 			) => a == b,
+			(
+				&MissingLineReference(a), &MissingLineReference(b)
+			) => *a == *b,
 			_ => false,
 		}
 	}
@@ -232,7 +254,7 @@ impl<'a> Parser<'a> {
 	}
 
 	fn flush_token_scanner(&mut self) -> Result<()> {
-		self.token_scan.flush();
+		self.token_scan.flush()?;
 		let mut flushed_bytes = token_scan::CharBuffer::new();
 		while let Some(b) = self.token_scan.try_pull() {
 			flushed_bytes.push(b);
@@ -275,7 +297,7 @@ impl<'a> Parser<'a> {
 	}
 
 	fn update_body(&mut self, byte: u8) -> Result<()> {
-		self.token_scan.push(byte);
+		self.token_scan.push(byte)?;
 
 		// narrowing can release a token too
 		if let Some(b) = self.token_scan.try_pull() {

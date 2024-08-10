@@ -25,6 +25,9 @@
 /// The limit of line numbers; all valid line numbers in a `u16` must be strictly less than this.
 pub const LIMIT: u16 = 0xff00;
 
+/// The marker byte indicating a coded line reference.
+pub const MARKER_BYTE: u8 = 0x8d;
+
 use thiserror::Error;
 
 /// A line number reference has three bytes of meaningful info, after the `0x8D` header (not

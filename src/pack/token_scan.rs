@@ -1,16 +1,40 @@
 //! Retokenise a text-format BASIC file.
 
+// Regarding line ref keywords (GOTO and GOSUB), we make a couple assumptions in this module:
+// - They have direct byte maps;
+// - They're greedy.
+
 use std::num::NonZeroU8;
 use std::{fmt, mem};
 
 use arrayvec::ArrayVec;
 
+use crate::line_numbers;
 use crate::support::{ArrayVecExt, HexArray};
 
 use basilisc_base::keyword::{RawKeyword, TokenIter, TokenPosition};
 
 // chars that didn't match anything
 pub(super) type CharBuffer = ArrayVec<u8, { basilisc_base::keyword::MAX_LEN as usize }>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Error {
+	InvalidLineRef { after: u8 },
+	MissingLineRef { after: u8 },
+}
+
+impl Error {
+	pub fn lookup(byte: u8) -> &'static ascii::AsciiStr {
+		crate::token_data::TOKEN_MAP_DIRECT.get_flat(byte as usize)
+			.map(RawKeyword::as_ascii_str)
+			.unwrap_or(Self::LOOKUP_DEFAULT)
+	}
+
+	const LOOKUP_DEFAULT: &'static ascii::AsciiStr = unsafe {
+		// SAFETY: string is obviously ASCII, and the crate doesn't give us any const fns for this
+		core::mem::transmute("keyword")
+	};
+}
 
 /// Core tokeniser.
 pub(super) struct TokenScanner {
@@ -20,6 +44,7 @@ pub(super) struct TokenScanner {
 	pinch: &'static [RawKeyword],
 	is_lhs: bool,
 	else_hack: ElseHack,
+	line_ref: LineRefState,
 }
 
 static PINCH_ALL: &[RawKeyword] = crate::token_data::LOOKUP_MAP.as_slice();
@@ -60,6 +85,13 @@ impl ElseHack {
 	}
 }
 
+#[derive(Debug, PartialEq, PartialOrd, Clone, Copy)]
+enum LineRefState {
+	No,
+	Expecting { kw_byte: u8 },
+	Building { kw_byte: u8, stage: u16 },
+}
+
 impl TokenScanner {
 	/// Constructs a new token scanner.
 	pub fn new() -> Self {
@@ -70,6 +102,7 @@ impl TokenScanner {
 			pinch: PINCH_ALL,
 			is_lhs: true,
 			else_hack: ElseHack::default(),
+			line_ref: LineRefState::No,
 		}
 	}
 
@@ -82,7 +115,7 @@ impl TokenScanner {
 	}
 
 	/// Pushes a new byte (a RISC OS Latin-1 char) into the scanner.
-	pub fn push(&mut self, ch: u8) {
+	pub fn push(&mut self, ch: u8) -> Result<(), Error> {
 		macro_rules! set_lhs {
 			(char) => { self.is_lhs = ch == b':'; };
 		}
@@ -98,7 +131,7 @@ impl TokenScanner {
 				});
 				if let Some(kw) = abbr_match {
 					self.commit_to(kw.tokens());
-					return;
+					return Ok(());
 				}
 			}
 		}
@@ -107,6 +140,35 @@ impl TokenScanner {
 		if self.else_hack.on_then && ch != b' ' {
 			// ELSE hack; we could've been in a multi-line IF, but we aren't
 			self.else_hack.on_then = false;
+		}
+
+		// line refs
+		let ch_is_digit = (b'0'..=b'9').contains(&ch);
+		match self.line_ref {
+			LineRefState::No => { } // do nothing, fall through to normal logic
+			LineRefState::Expecting { kw_byte: _ } if matches!(ch, b' ' | b'\t')
+				=> { } // pass through spaces
+			LineRefState::Expecting { kw_byte } if ch_is_digit => {
+				// time to start the line ref
+				self.line_ref = LineRefState::Building { kw_byte, stage: (ch - b'0') as u16 };
+				return Ok(()); // do nothing else with this byte
+			}
+			LineRefState::Expecting { kw_byte } // some unexpected character
+				=> return Err(Error::InvalidLineRef { after: kw_byte }),
+			LineRefState::Building { kw_byte, ref mut stage } if ch_is_digit => {
+				let new_line_ref = (*stage as u32) * 10 + (ch - b'0') as u32;
+				if new_line_ref >= line_numbers::LIMIT as u32 {
+					self.line_ref = LineRefState::No;
+					return Err(Error::InvalidLineRef { after: kw_byte }); // number went too high
+				}
+				*stage = new_line_ref as u16;
+				return Ok(()); // do nothing else with this byte
+			}
+			LineRefState::Building { kw_byte, stage } => {
+				// finished the line number; flush state
+				self.push_enc_line_ref(kw_byte, stage)?;
+				// this wasn't a line ref digit though, so fall through
+			}
 		}
 
 		match (Self::is_keyword_char(ch), self.pinch.is_empty()) {
@@ -133,13 +195,15 @@ impl TokenScanner {
 				set_lhs!(char);
 			},
 		}
+
+		Ok(())
 	}
 
 	/// Flushes any remaining characters out of the scanner.
 	///
 	/// You should always call this, then [`try_pull`](Self::try_pull), when you have no more bytes
 	/// coming in from a line.
-	pub fn flush(&mut self) {
+	pub fn flush(&mut self) -> Result<(), Error> {
 		if let Some(kw) = self.best_match.take().filter(|kw|
 			kw.len().get() as usize == self.char_buf.len()
 		) {
@@ -161,10 +225,39 @@ impl TokenScanner {
 		self.char_buf.clear();
 		self.pinch = PINCH_ALL;
 
+		match self.line_ref {
+			LineRefState::No => { } // no problem
+			LineRefState::Expecting { kw_byte } => {
+				// uh oh, we were expecting a line reference here
+				return Err(Error::MissingLineRef { after: kw_byte });
+			}
+			LineRefState::Building { kw_byte, stage } => {
+				// line finished with a line ref decimal byte. ok!
+				self.push_enc_line_ref(kw_byte, stage)?;
+			}
+		}
+
 		if self.else_hack.on_then {
 			// we are in a multi-line IF, change the ELSE token
 			self.else_hack.push();
 		}
+
+		Ok(())
+	}
+
+	fn push_enc_line_ref(&mut self, kw_byte: u8, stage: u16) -> Result<(), Error> {
+		let Ok(enc) = line_numbers::try_encode(stage) else {
+			return Err(Error::InvalidLineRef { after: kw_byte })
+		};
+
+		self.char_out_buf.try_push(line_numbers::MARKER_BYTE)
+			.expect("no room for marker byte");
+
+		self.char_out_buf.try_extend_from_slice(&enc)
+			.expect("no room for line ref");
+
+		self.line_ref = LineRefState::No;
+		Ok(())
 	}
 
 	fn set_token_buf(&mut self, mut new: TokenIter) {
@@ -259,12 +352,21 @@ impl TokenScanner {
 		self.char_buf.clear(); // all bytes accounted for
 		self.pinch = PINCH_ALL; // ready for future stuff
 
-		self.is_lhs = if ti.peek_first() == ElseHack::THEN {
+		let first_byte = ti.peek_first();
+
+		self.is_lhs = if first_byte == ElseHack::THEN {
 			self.else_hack.on_then = true;
 			true
 		} else {
 			false
 		};
+
+		if let Some(true) = crate::token_data::TOKEN_MAP_DIRECT.get_flat(first_byte as usize)
+		.map(|k| k.triggers_line_ref()) {
+			// we just pushed a line-ref-triggering keyword
+			debug_assert!(matches!(self.line_ref, LineRefState::No));
+			self.line_ref = LineRefState::Expecting { kw_byte: first_byte };
+		}
 	}
 
 	fn commit_best_match(&mut self) {
@@ -388,7 +490,7 @@ mod tests {
 			let mut scanner = TokenScanner::new();
 			for &ch in word {
 				assert_eq!(None, scanner.try_pull());
-				scanner.push(ch);
+				scanner.push(ch).unwrap();
 			}
 			assert_eq!(Some(token), scanner.try_pull());
 		}
@@ -499,6 +601,15 @@ mod tests {
 		assert_output(b"PRINT\"it works\"", b"\xf1\"it works\"");
 	}
 
+	#[test]
+	fn goto_gosub() {
+		assert_output(b"GOTO10", b"\xe5\x8dTJ@");
+		assert_output(b"GOSUB10", b"\xe4\x8dTJ@");
+		assert_output(b"GOTO 600", b"\xe5 \x8dDXB");
+		assert_output(b"GOTO 10 and then do sth else", b"\xe5 \x8dTJ@ and then do sth else");
+		assert_output(b"finally, GOSUB 0", b"finally, \xe4 \x8dT@@");
+	}
+
 	#[track_caller]
 	fn assert_output(input: &[u8], output: &[u8]) {
 		let got = _inout(input);
@@ -519,10 +630,15 @@ mod tests {
 		let mut out_buf = Vec::with_capacity(src.len());
 
 		for &ch in src {
-			scanner.push(ch);
-			scanner.try_pull().map(|b| out_buf.push(b));
+			scanner.push(ch).unwrap();
+			loop {
+				match scanner.try_pull() {
+					Some(b) => out_buf.push(b),
+					None => break,
+				}
+			}
 		}
-		scanner.flush();
+		scanner.flush().unwrap();
 		while let Some(b) = scanner.try_pull() {
 			out_buf.push(b);
 		}
