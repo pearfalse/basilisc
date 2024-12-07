@@ -1,4 +1,4 @@
-//! Cooked keywords are high-level representations of BASIC keyword data, used by the build script
+//! Cooked keywords are high-level representations of BASIC keyword data, used by this crate
 //! to generate raw keyword data. See [`Keyword`] for more.
 
 use std::fmt;
@@ -21,9 +21,9 @@ impl fmt::Display for KeywordCtorError {
 	}
 }
 
-/// Represents a BASIC keyword at a high level. `build.rs` uses this to hold its own representation
+/// Represents a BASIC keyword at a high level. This crate uses this to hold its own representation
 /// of all BASIC keywords `basilisc` needs to know about, and uses it to construct the
-/// [`RawKeyword`](keyword::RawKeyword) arrays that `basilisc` will refer to at runtime.
+/// [`RawKeyword`] arrays that `basilisc` will refer to at runtime.
 ///
 /// A keyword's data is:
 ///

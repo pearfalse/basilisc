@@ -281,7 +281,7 @@ impl<'a> IntoIterator for &'a RawKeyword {
 
 /// An iterator over the characters of a keyword.
 ///
-/// Logically, the yielded item is an [`AsciiChar`](ascii::AsciiChar), but for maximum compatibility
+/// Logically, the yielded item is an [`AsciiChar`], but for maximum compatibility
 /// with the crate's call sites, it yields them as [`u8`]s.
 #[derive(Debug, Clone)]
 pub struct Iter<'a> {

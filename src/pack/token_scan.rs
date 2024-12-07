@@ -1,9 +1,5 @@
 //! Retokenise a text-format BASIC file.
 
-// Regarding line ref keywords (GOTO and GOSUB), we make a couple assumptions in this module:
-// - They have direct byte maps;
-// - They're greedy.
-
 use std::num::NonZeroU8;
 use std::{fmt, mem};
 
