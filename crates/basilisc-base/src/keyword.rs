@@ -335,9 +335,3 @@ impl<'a> Iterator for Iter<'a> {
 		next_byte.copied()
 	}
 }
-
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-}
