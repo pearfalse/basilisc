@@ -37,8 +37,7 @@ enum Command {
 #[derive(Debug, Options)]
 struct PackArgs {
 
-	#[options(help = "ASCII input file to encode (or `-` for stdin)", required,
-		long = "input", meta = "<path or `-`>")]
+	#[options(help = "ASCII input file to encode (or `-` for stdin)", required, free)]
 	input_file: String,
 
 	#[options(help = "output BASIC file (or `-` for stdout)", required,
@@ -57,8 +56,7 @@ struct PackArgs {
 #[derive(Debug, Options)]
 struct UnpackArgs {
 
-	#[options(help = "BASIC file to decode (or `-` for stdin)", required,
-		long = "input", meta = "<path or `-`>")]
+	#[options(help = "BASIC file to decode (or `-` for stdin)", required, free)]
 	input_file: String,
 
 	#[options(help = "output ASCII file (or `-` for stdout)", required,
