@@ -16,13 +16,13 @@ There is no \[deliberate\] support for post-Acorn BASIC files. I'm not opposed t
 
 To unpack a tokenised BASIC file:
 
-<code>basilisc unpack -i path/to/basic/file,ffb -o path/to/text/version.txt</code>
+<code>basilisc unpack -o path/to/text/version.txt path/to/basic/file,ffb</code>
 
 The output will be a UTF-8 text file with LF line endings with the full program listing. Line numbers are only included for any lines referenced with a `GOTO` or `GOSUB`; if you want all lines to have their line numbers included, add the argument `--use-line-numbers=always` to the command. Non-printing and non-ASCII characters are preserved with a lossless mapping to printing Unicode characters.
 
 To convert the other way:
 
-<code>basilisc pack -i path/to/text/version.txt -o path/to/basic/file,ffb</code>
+<code>basilisc pack -o path/to/basic/file,ffb path/to/text/version.txt</code>
 
 The output will be a tokenised BASIC file ready to use on any version of BBC BASIC.
 
