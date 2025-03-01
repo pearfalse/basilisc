@@ -35,11 +35,7 @@ pub const STORE_SIZE: u8 = 12;
 pub struct RawKeyword {
 	/// Actual meaningful characters
 	chars: [u8; MAX_LEN as usize],
-	/// Flags
-	///
-	/// - b7: only if as an lvalue
-	/// - b6 to b4: unused, must be 0
-	/// - b3 to b0: minimum abbreviation length (if 0, no abbrev)
+	/// Flags (see the `flags` submodule)
 	flags: u8,
 	/// Token byte in its namespace.
 	token_byte: NonZeroU8,
@@ -197,16 +193,19 @@ impl RawKeyword {
 	///
 	/// The following preconditions must match:
 	///
-	/// - The first `n` bytes of `src`, where `n` is the keyword length in bytes, must be printing
-	///   ASCII characters, excluding space;
 	/// - The keyword length in bytes (`n`) must be non-zero and set in `src[11]`, OR-ed with
-	///   the u8 cast of the appropriate `Prefix` value;
-	/// - `src[9]` must not set any bits in `flags::RESERVED`;
-	/// - The minimum abbrev length in `src[9]` must be less than the string length or zero.
+	///   the u8 cast of the appropriate `Prefix` value.
+	/// - The first `n` bytes of `src`, where `n` is the keyword length in bytes, must be printing
+	///   ASCII characters, excluding space. The rest should be zero.
+	/// - The minimum abbrev length in `src[9]` must be less than the string length (it may be zero).
+	/// - The token byte in `src[10]` must be non-zero.
 	pub const unsafe fn new_unchecked(src: [u8; STORE_SIZE as usize]) -> Self {
 		let raw_len = src[STORE_SIZE as usize - 1] & Prefix::LOWER_BITS;
 		debug_assert!(raw_len > 0 && raw_len <= MAX_LEN);
-		mem::transmute(src)
+		unsafe {
+			// SAFETY: caller promises to uphold documented safety invariants
+			mem::transmute(src)
+		}
 	}
 
 	/// Indicates whether this keyword only tokenises as an lvalue or rvalue.
