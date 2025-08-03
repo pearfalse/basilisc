@@ -310,6 +310,7 @@ fn run_pack(args: PackArgs) -> Result<(), PackError> {
 			output_file = fs::File::options()
 				.write(true)
 				.truncate(true)
+				.create(true)
 				.open(path)?;
 			&mut output_file
 		},
