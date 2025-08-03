@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 
+#[allow(unused_imports)]
 use sptr::Strict;
 
 use super::UnnumberedLine;
@@ -48,7 +49,10 @@ impl<'a> Iterator for FindGaps<'a> {
 		use std::ptr;
 
 		let mut search = unsafe {
-			// SAFETY: shared borrow starts here; to be split before &mut refs
+			// SAFETY: `self.start` and `self.end` are always valid edges of a half-open range
+			// encompassing the original `&'a mut [UnnumberedLine]`
+			//
+			// shared borrow starts here; to be split before &mut refs
 			&*ptr::slice_from_raw_parts(self.start,
 				self.end.offset_from(self.start) as usize)
 		};
@@ -71,7 +75,7 @@ impl<'a> Iterator for FindGaps<'a> {
 				=> return None,
 
 				[_, rest @ ..]
-				// pop front node and keep doing
+				// pop front node and keep going
 				=> {
 					debug_assert!(!search.is_empty());
 					search = rest;
