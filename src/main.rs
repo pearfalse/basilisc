@@ -309,9 +309,10 @@ fn run_pack(args: PackArgs) -> Result<(), PackError> {
 		path => {
 			output_file = fs::File::options()
 				.write(true)
-				.truncate(true)
 				.create(true)
-				.open(path)?;
+				.truncate(true)
+				.open(path)
+				.inspect_err(|_| eprintln!("Failed to open output file"))?;
 			&mut output_file
 		},
 	};
@@ -323,7 +324,7 @@ fn run_pack(args: PackArgs) -> Result<(), PackError> {
 			&mut stdin_lock
 		},
 		path => {
-			input_file = BufReader::new(fs::File::open(path)?);
+			input_file = BufReader::new(fs::File::open(path).inspect_err(|_| eprintln!("Failed to open input file"))?);
 			&mut input_file
 		},
 	};
