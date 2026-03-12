@@ -126,7 +126,7 @@ impl<'a> ByteDecoder<'a> {
 					self.drain as *const u8,
 					self.buf as *mut u8,
 					rem_len);
-				let space_len = (*self.buf).len() - rem_len;
+				let space_len = self.buf.len() - rem_len;
 				ptr::slice_from_raw_parts_mut(
 					(self.buf as *mut u8).add(rem_len),
 					space_len)
@@ -157,10 +157,7 @@ impl<'a> ByteDecoder<'a> {
 
 	#[inline(always)]
 	fn drain_len(&self) -> usize {
-		unsafe {
-			// SAFETY: self.drain is always a valid slice
-			(*self.drain).len()
-		}
+		self.drain.len()
 	}
 }
 
