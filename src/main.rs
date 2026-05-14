@@ -83,9 +83,18 @@ enum UnpackError {
 	DisallowedLineReference,
 }
 
-impl<T> From<T> for UnpackError where unpack::Error: From<T> {
-	fn from(src: T) -> Self {
-		Self::Forwarded(src.into())
+impl From<unpack::Error> for UnpackError {
+	#[inline]
+	fn from(e: unpack::Error) -> Self {
+		UnpackError::Forwarded(e)
+	}
+}
+
+impl<E> From<E> for UnpackError
+where unpack::ErrorKind: From<E> {
+	#[inline]
+	fn from(e: E) -> Self {
+		UnpackError::Forwarded(unpack::Error::wrap_without_line_number(e.into()))
 	}
 }
 
@@ -217,11 +226,6 @@ fn run_unpack(args: &UnpackArgs) -> Result<(), UnpackError> {
 	let mut input_file;
 	let mut output_file;
 
-	#[allow(clippy::items_after_statements)]
-	fn wrap_io_error(ioe: io::Error) -> UnpackError {
-		UnpackError::from(unpack::ErrorKind::IoError(ioe))
-	}
-
 	// Set output io objects
 	let output: &mut dyn io::Write = match &*args.output_file {
 		"-" => {
@@ -230,7 +234,7 @@ fn run_unpack(args: &UnpackArgs) -> Result<(), UnpackError> {
 			&mut stdout_lock
 		},
 		path => {
-			output_file = fs::File::create(path).map_err(wrap_io_error)?;
+			output_file = fs::File::create(path)?;
 			&mut output_file
 		}
 	};
@@ -243,7 +247,7 @@ fn run_unpack(args: &UnpackArgs) -> Result<(), UnpackError> {
 			&mut stdin_lock
 		},
 		path => {
-			input_file = BufReader::new(fs::File::open(path).map_err(wrap_io_error)?);
+			input_file = BufReader::new(fs::File::open(path)?);
 			&mut input_file
 		},
 	};
@@ -268,10 +272,10 @@ fn run_unpack(args: &UnpackArgs) -> Result<(), UnpackError> {
 		match (args.use_line_numbers, parser.referenced_lines().get(line.line_number)) {
 			(UnpackLineNumbersOption::AlwaysShow, _) |
 			(UnpackLineNumbersOption::Minimal, true)
-				=> write!(output, "{:5}", line.line_number).map_err(wrap_io_error)?,
+				=> write!(output, "{:5}", line.line_number)?,
 
 			(UnpackLineNumbersOption::Minimal, false) if there_are_any_referenced_lines
-				=> output.write_all(&[32u8; 6][..]).map_err(wrap_io_error)?,
+				=> output.write_all(&[32u8; 6][..])?,
 
 			_ => {},
 		}
@@ -281,13 +285,13 @@ fn run_unpack(args: &UnpackArgs) -> Result<(), UnpackError> {
 			output.write_all(
 				char::from_risc_os_latin1(latin1_byte)
 				.encode_utf8(&mut utf8_buf)
-				.as_bytes())
-			.map_err(wrap_io_error)?;
+				.as_bytes())?;
 		}
-		writeln!(output).map_err(wrap_io_error)?;
+		writeln!(output)?;
 	}
 
-	output.flush().map_err(wrap_io_error)
+	output.flush()?;
+	Ok(())
 }
 
 fn run_pack(args: &PackArgs) -> Result<(), PackError> {

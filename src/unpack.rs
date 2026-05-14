@@ -71,6 +71,15 @@ impl Error {
 			None
 		}
 	}
+
+	#[inline]
+	pub(crate) fn wrap_without_line_number<E>(e: E) -> Self
+	where ErrorKind: From<E> {
+		Self {
+			line_number: u16::MAX,
+			kind: ErrorKind::from(e),
+		}
+	}
 }
 
 impl fmt::Display for Error {
