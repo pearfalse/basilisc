@@ -272,9 +272,9 @@ token_map![TOKEN_MAP_DIRECT, Direct,
 	(0x8a, "TAB("),
 	(0x8b, "ELSE"),
 	(0x8c, "THEN", abbr 2),
-	// 0x8d is a fix, we hardcode that special case
+	// 0x8d is a prefix, we hardcode that special case
 	(0x8e, "OPENIN", abbr 2),
-	(0x8f, "PTR", abbr 2, nongreedy),
+	(0x8f, "PTR", abbr 2, pos Right, nongreedy),
 	(0x90, "PAGE", abbr 2, pos Right, nongreedy),
 	(0x91, "TIME", abbr 2, pos Right, nongreedy),
 	(0x92, "LOMEM", abbr 3, pos Right, nongreedy),
@@ -329,7 +329,7 @@ token_map![TOKEN_MAP_DIRECT, Direct,
 	(0xc3, "STR$", abbr 3),
 	(0xc4, "STRING$(", abbr 4),
 	(0xc5, "EOF", nongreedy),
-	// c6 c7 c8 are fixes for two-byte tokens
+	// c6 c7 c8 are prefixes for two-byte tokens
 	// TODO: they map to AUTO, DELETE and LOAD on Beeb
 	(0xc9, "WHEN"),
 	(0xca, "OF"),
@@ -337,7 +337,7 @@ token_map![TOKEN_MAP_DIRECT, Direct,
 	// ELSE, but in multiline IF statements; handled separately
 	(0xcd, "ENDIF", nongreedy),
 	(0xce, "ENDWHILE", nongreedy),
-	(0xcf, "PTR", abbr 2, nongreedy),
+	(0xcf, "PTR", abbr 2, pos Left, nongreedy),
 	(0xd0, "PAGE", abbr 2, pos Left, nongreedy),
 	(0xd1, "TIME", abbr 2, pos Left, nongreedy),
 	(0xd2, "LOMEM", abbr 3, pos Left, nongreedy),

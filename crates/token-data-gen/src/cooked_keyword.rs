@@ -181,15 +181,26 @@ impl PartialOrd for Keyword {
 }
 
 impl Ord for Keyword {
+	/// Compares two keywords for their ordering.
+	///
+	/// # Panics
+	/// Unlike most `Ord` implementations, this will panic if two keywords compare equal! It is a
+	/// logic error for two keywords in generated token data to equate to each other according to
+	/// these rules. If you need to test for equality between two cooked keywords for some reason,
+	/// use `PartialEq`.
 	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
 		fn abbr(src: &Keyword) -> u8 {
 			src.min_abbrev.map(NonZeroU8::get).unwrap_or(0)
 		}
 
 		// compare keyword, greedy, pos, abbr (not byte, that's output data)
-		self.keyword().cmp(other.keyword())
+		let r = self.keyword().cmp(other.keyword())
 			.then_with(|| self.position.cmp(&other.position))
-			.then_with(|| abbr(self).cmp(&abbr(other)))
+			.then_with(|| abbr(self).cmp(&abbr(other)));
+
+		assert!(r != std::cmp::Ordering::Equal,
+			"two cooked keywords compared equal: {self:?}, {other:?}");
+		r
 	}
 }
 

@@ -25,7 +25,7 @@ pub const STORE_SIZE: u8 = 12;
 /// This struct defines its own ordering rules as:
 ///
 /// - Lexical ordering of full keyword;
-/// - Token position (any < rvalue-only < lvalue-only);
+/// - Token position (any &lt; rvalue-only &lt; lvalue-only);
 /// - Abbreviation length.
 ///
 /// While this means that keywords cannot be stably sorted, no two keywords should ever be equal to
