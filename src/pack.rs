@@ -231,8 +231,8 @@ impl<'a> Parser<'a> {
 		Ok(!self.is_eof)
 	}
 
+	// TODO: replace Option<Option<_>>
 	fn raw_line(&mut self) -> Result<Option<Option<u16>>> {
-		// TODO: encode line number references properly
 		#[derive(Debug)]
 		enum LineParser {
 			BeforeLineNumber,

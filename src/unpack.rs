@@ -183,13 +183,16 @@ pub struct Parser<I: NextByte> {
 	referenced_lines: PerLineBits,
 }
 
+// it would be 251 instances of the keyword `OTHERWISE`, after an explicit line number
+const LONGEST_POSSIBLE_LINE: usize = basilisc_base::keyword::MAX_LEN as usize * 251 + 5;
+
 impl<I: NextByte> Parser<I>
 where I: NextByte, ErrorKind: From<<I as NextByte>::Error> {
 	/// Constructs a new parser based on an I/O object.
 	pub fn new(inner: I) -> Self {
 		Self {
 			inner: Peekable::new(inner),
-			buffer: Vec::with_capacity(256), // TODO how big can a line be?
+			buffer: Vec::with_capacity(LONGEST_POSSIBLE_LINE), // TODO: actually limit to this len
 			line_state: LineState::default(),
 			line_ref: None,
 			token_lookup: None,
@@ -381,7 +384,6 @@ where I: NextByte, ErrorKind: From<<I as NextByte>::Error> {
 				// if next byte is also a token char, or token, insert a space
 				// this undoes an optimisation by BASIC squashers that would destroy the
 				// program syntax on a plaintext roundtrip
-				// TODO: check if this is right
 				self.inner.peek().is_some_and(|b| b >= 0x7f || b.is_ascii_alphabetic())
 				;
 			self.cur_token = KeywordIter2::new(s.iter(), should_insert_space);
