@@ -62,9 +62,9 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 		if must_drop {
 			// copy items to here for dropping later
 			unsafe {
-				// we go through a raw slice to keep miri happy
-				// FIXME: miri might be better at understanding this now
-				let dst = ptr::slice_from_raw_parts_mut(drop_sites.as_mut_ptr(), x).cast::<T>();
+				// SAFETY: `drop_sites` is the correct type, large enough, and a completely
+				// separate allocation
+				let dst = drop_sites.as_mut_ptr().cast::<T>();
 				ptr::copy_nonoverlapping(self.as_ptr(), dst, x);
 			}
 		}
