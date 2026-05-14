@@ -53,7 +53,7 @@ pub enum EncodeError {
 /// Encodes a line number into its equivalent line reference format.
 ///
 /// # Errors
-/// Returns `Err(EncodeError::OutOfRange)` if `line_number` is not below [`LIMIT`].
+/// Returns `EncodeError::OutOfRange` if `line_number` is not below [`LIMIT`].
 pub fn try_encode(line_number: u16) -> Result<Encoded, EncodeError> {
 	if line_number >= LIMIT { return Err(EncodeError::OutOfRange); }
 
@@ -71,6 +71,7 @@ pub fn try_encode(line_number: u16) -> Result<Encoded, EncodeError> {
 /// Decodes a byte array into its equivalent numeric format.
 ///
 /// # Errors
+/// Returns `DecodeError::OutOfRange` if the decoded line number is not below [`LIMIT`].
 pub fn try_decode(encoded: Encoded) -> Result<u16, DecodeError> {
 	let a = u32::from(encoded[0]);
 	let b = u32::from(encoded[1]);
