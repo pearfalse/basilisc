@@ -405,7 +405,7 @@ where I: NextByte, ErrorKind: From<<I as NextByte>::Error> {
 		match **ref_stage {
 			[a, b] => {
 				let mut decoded = line_numbers::try_decode([a, b, next_byte])?;
-				self.referenced_lines.get_mut(decoded).set();
+				self.referenced_lines.set(decoded);
 				debug_assert!(self.byte_flush.is_empty());
 
 				// stringify line reference

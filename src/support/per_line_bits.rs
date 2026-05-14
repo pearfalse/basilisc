@@ -35,18 +35,6 @@ impl PerLineBits {
 		self.store.get(byte_idx as usize).map(|r| *r & bit_mask != 0)
 	}
 
-	/// Retrieves a mutable reference to a bit in the array.
-	///
-	/// Returns `None` if the index is outside the logical index range.
-	pub fn try_get_mut(&mut self, index: u16) -> Option<BitRefMut<'_>> {
-		let (byte_idx, bit_mask) = Self::decompose(index);
-		self.store.get_mut(byte_idx as usize).map(|rm| BitRefMut {
-			r#ref: rm,
-			bit_mask,
-		})
-	}
-
-
 	/// Retrieves the value of a bit in the array.
 	///
 	/// # Panics
@@ -56,28 +44,15 @@ impl PerLineBits {
 		self.try_get(index).expect("index out of range")
 	}
 
-	/// Retrieves a mutable reference to a bit in the array.
-	///
-	/// # Panics
-	///
-	/// This function will panic if the index is out of range.
-	pub fn get_mut(&mut self, index: u16) -> BitRefMut<'_> {
-		self.try_get_mut(index).expect("index out of range")
-	}
-
-	/// Returns an iterator over all bit values in the array.
-	pub fn iter(&self) -> Iter<'_> {
-		Iter::new(self)
+	/// Sets a bit in the array at the given index.
+	pub fn set(&mut self, index: u16) {
+		let (index, mask) = Self::decompose(index);
+		self.store[usize::from(index)] |= mask;
 	}
 
 	/// Returns an iterator over **indexes** of all set bits in the array.
 	pub fn iter_set(&self) -> IterSet<'_> {
 		IterSet::new(self)
-	}
-
-	/// Returns an iterator over **indexes** of all cleared bits in the array.
-	pub fn iter_clear(&self) -> IterClear<'_> {
-		IterClear::new(self)
 	}
 
 	// decomposes a logical index into a byte index and bitmask
@@ -89,103 +64,25 @@ impl PerLineBits {
 }
 
 
-/// A mutable reference, logically speaking, to a single bit in a byte array.
-///
-/// Returned by the `get_mut` and `try_get_mut` methods on [`PerLineBits`].
-#[derive(Debug)]
-pub struct BitRefMut<'a> {
-	r#ref: &'a mut u8,
-	bit_mask: u8,
-}
-
-impl BitRefMut<'_> {
-
-	/// Retrieves the bit value (`true` if the bit is set).
-	#[inline]
-	pub fn bit(&self) -> bool {
-		(*self.r#ref & self.bit_mask) != 0
-	}
-
-	/// Sets the bit.
-	#[inline]
-	pub fn set(&mut self) {
-		*self.r#ref |= self.bit_mask;
-	}
-
-	/// Clears the bit.
-	#[inline]
-	pub fn clear(&mut self) {
-		*self.r#ref &= !self.bit_mask;
-	}
-
-	/// Sets the bit if `value` is true and clears it if not.
-	#[inline]
-	pub fn set_to(&mut self, value: bool) {
-		if value { self.set() } else { self.clear() }
-	}
-}
-
-
-/// An iterator over all bit values.
-///
-/// Constructed by the `iter` method on [`PerLineBits`].
-#[derive(Debug)]
-pub struct Iter<'a> {
-	bytes: slice::Iter<'a, u8>,
-	cur_byte: Option<u8>,
-	bit_mask: u8,
-}
-
-impl<'a> Iter<'a> {
-	fn new(upper: &'a PerLineBits) -> Self {
-		Self {
-			bytes: upper.store.iter(),
-			cur_byte: None,
-			bit_mask: 1,
-		}
-	}
-}
-
-impl Iterator for Iter<'_> {
-	type Item = bool;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		let byte = match self.cur_byte {
-			Some(b) => b,
-			None => *self.cur_byte.insert(*self.bytes.next()?),
-		};
-
-		let r = byte & self.bit_mask != 0;
-		self.bit_mask = self.bit_mask.checked_shl(1).unwrap_or_else(|| {
-			self.cur_byte = None;
-			1
-		});
-
-		Some(r)
-	}
-}
-
-
-/// Implementing struct for `IterSet` and `IterClear`.
-pub struct IterFiltered<'a, const S: bool = true> {
+/// Iterates over the indexes of all set bits.
+pub struct IterSet<'a> {
 	upper: iter::Enumerate<iter::Copied<slice::Iter<'a, u8>>>,
 	cur_byte: Option<(usize, u8)>,
 	bit_pos: u8,
 }
 
-impl<const S: bool> fmt::Debug for IterFiltered<'_, S> {
+impl fmt::Debug for IterSet<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "IterFiltered<{S}>")?;
-		f.debug_struct("")
-			.field("cur_byte", &IterFilteredPos(self))
+		f.debug_struct(stringify!(IterSet))
+			.field("cur_byte", &IterSetPos(self))
 			.field("bit_pos", &format_args!("1<<{}", self.bit_pos))
 			.finish()
 	}
 }
 
-/// Helper struct for `IterFiltered`'s [`Debug`](std::fmt::Debug) impl.
-struct IterFilteredPos<'a, const S: bool>(&'a IterFiltered<'a, S>);
-impl<const S: bool> fmt::Debug for IterFilteredPos<'_, S> {
+/// Helper struct for `IterSet`'s [`Debug`](std::fmt::Debug) impl.
+struct IterSetPos<'a>(&'a IterSet<'a>);
+impl fmt::Debug for IterSetPos<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self.0.cur_byte {
 			Some((idx, byte)) => write!(f, "{idx}/{byte:02x}"),
@@ -194,7 +91,7 @@ impl<const S: bool> fmt::Debug for IterFilteredPos<'_, S> {
 	}
 }
 
-impl<'a, const S: bool> IterFiltered<'a, S> {
+impl<'a> IterSet<'a> {
 	fn new(upper: &'a PerLineBits) -> Self {
 		Self {
 			upper: upper.store.iter().copied().enumerate(),
@@ -204,20 +101,14 @@ impl<'a, const S: bool> IterFiltered<'a, S> {
 	}
 
 	// if the byte is set to this, don't bother checking individual bits
-	const fn skip_clue() -> u8 {
-		if S { 0x00 } else { 0xff }
-	}
+	const SKIP_CLUE: u8 = 0x00;
 
-	fn check_bit(byte: u8, idx: u8) -> bool {
-		if S {
-			byte & (1u8 << idx) != 0
-		} else {
-			byte & (1u8 << idx) == 0
-		}
+	const fn check_bit(byte: u8, idx: u8) -> bool {
+		byte & (1u8 << idx) != 0
 	}
 }
 
-impl<const S: bool> Iterator for IterFiltered<'_, S> {
+impl Iterator for IterSet<'_> {
 	type Item = u16;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -228,7 +119,7 @@ impl<const S: bool> Iterator for IterFiltered<'_, S> {
 			};
 
 			// we expect most bits *not* to match
-			if byte == Self::skip_clue() {
+			if byte == Self::SKIP_CLUE {
 				debug_assert!(self.bit_pos == 0);
 				self.cur_byte = None;
 				continue;
@@ -266,75 +157,22 @@ impl<const S: bool> Iterator for IterFiltered<'_, S> {
 	}
 }
 
-/// Iterates over the indexes of all set bits.
-pub type IterSet<'a> = IterFiltered<'a, true>;
-/// Iterates over the indexes of all cleared bits.
-pub type IterClear<'a> = IterFiltered<'a, false>;
-
 
 #[cfg(test)]
 mod test {
 	use super::PerLineBits;
 
 	#[test]
-	fn get() {
-		let mut sut = PerLineBits::new();
-		assert_eq!(Some(false), sut.try_get(0));
-		sut.store[0] = 1;
-		assert_eq!(Some(true), sut.try_get(0));
-
-		assert_eq!(Some(false), sut.try_get(7));
-		sut.store[0] = 0x80;
-		assert_eq!(Some(true), sut.try_get(7));
-
-		assert_eq!(false, sut.get(9));
-		sut.store[1] = 2;
-		assert_eq!(true, sut.get(9));
-
-		assert!(sut.try_get(0xff00).is_none());
-		assert!(sut.try_get(u16::MAX).is_none());
-	}
-
-	#[test]
 	fn get_mut() {
 		let mut sut = PerLineBits::new();
 
 		assert_eq!(0, sut.store[0]);
-		let mut r#ref = sut.try_get_mut(3).unwrap();
-		assert!(! r#ref.bit());
-		r#ref.set();
+		sut.set(3);
 		assert_eq!(1u8<<3, sut.store[0]);
 
-		sut.store[0x20] = 0b1111_1111;
-		sut.get_mut(0x104).clear();
-		assert_eq!(0b1110_1111, sut.store[0x20]);
-
 		sut.store[2] = 0b0000_0010;
-		sut.get_mut(16).set_to(true);
-		sut.get_mut(17).set_to(false);
-		assert_eq!(0b0000_0001, sut.store[2]);
-
-		assert!(sut.try_get_mut(0xff00).is_none());
-		assert!(sut.try_get_mut(u16::MAX).is_none());
-	}
-}
-
-#[cfg(test)]
-mod test_iter {
-	use super::*;
-
-	#[test]
-	fn iter_bits() {
-		let mut upper = PerLineBits::new();
-		upper.store[0] = 0b1010_0011;
-
-		let mut sut = upper.iter();
-		for expect in [
-			Some(true), Some(true), Some(false), Some(false),
-			Some(false), Some(true), Some(false), Some(true),
-		] {
-			assert_eq!(expect, sut.next());
-		}
+		sut.set(16);
+		assert_eq!(0b0000_0011, sut.store[2]);
 	}
 
 	#[test]
@@ -346,23 +184,6 @@ mod test_iter {
 
 		let mut sut = upper.iter_set();
 		for expect in [4, 6, 7, 8, 9, 10, 11, 0xfef8] {
-			assert_eq!(Some(expect), sut.next());
-		}
-		assert_eq!(None, sut.next());
-	}
-
-	#[test]
-	fn iter_cleared() {
-		let mut upper = PerLineBits::new();
-		// pre-set all bits
-		for byte in &mut *upper.store {
-			*byte = 0xff;
-		}
-		upper.store[0] = 0b0111_1110;
-		upper.store[50] = 0b1110_0111;
-
-		let mut sut = upper.iter_clear();
-		for expect in [0, 7, 403, 404] {
 			assert_eq!(Some(expect), sut.next());
 		}
 		assert_eq!(None, sut.next());
