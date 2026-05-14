@@ -49,7 +49,7 @@ impl Keyword {
 	/// This function returns `Err([KeywordCtorError])` if any of these conditions are not met:
 	///
 	/// - The keyword must contain printable ASCII bytes only[^1].
-	/// - The keyword must be between 1 and 9 characters in length.
+	/// - The keyword must be between 2 and 9 characters in length.
 	/// - If `min_abbrev` is populated, it must be between 1 and 7.
 	///
 	/// [^1]: `basilisc`'s tokeniser has more stringent requirements than this; this is just a small
