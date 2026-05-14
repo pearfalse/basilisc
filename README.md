@@ -40,5 +40,5 @@ Basilisc is designed to support round-trip conversion, with as close to a byte-f
 To generate a release binary from source:
 
 - Clone the repo to a folder of your choosing (the default branch is `trunk`).
-- Run `build.sh` from a terminal `cd`-ed to the repo root. This requires a unix-like environment; if on Windows, run `build.cmd` instead.
+- Run `make release` from a terminal `cd`-ed to the repo root. This requires a unix-like environment; if on Windows, run `build.cmd` instead.
 - The binary is at `target/release/basilisc` (`basilisc.exe` on Windows).
