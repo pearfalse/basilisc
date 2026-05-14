@@ -188,7 +188,6 @@ impl Ord for Keyword {
 
 		// compare keyword, greedy, pos, abbr (not byte, that's output data)
 		self.keyword().cmp(other.keyword())
-			.then_with(|| self.greedy.cmp(&other.greedy)) // TODO: necessary?
 			.then_with(|| self.position.cmp(&other.position))
 			.then_with(|| abbr(self).cmp(&abbr(other)))
 	}
