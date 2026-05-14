@@ -34,26 +34,31 @@ use thiserror::Error;
 /// included here).
 pub type Encoded = [u8; 3];
 
+/// Reasons why a line number reference may fail to decode.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum DecodeError {
+	/// Out of the valid range of `&0000`–`&feff`.
 	#[error("out of range (decoded value was &{0:x}, but must be less than &ff00")]
 	OutOfRange(u32),
 }
 
+/// Reasons why a line number reference may fail to encode.
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum EncodeError {
+	/// Out of the valid range of `&0000`–`&feff`.
 	#[error("out of range (line number must be less than &ff00)")]
 	OutOfRange,
 }
 
 /// Encodes a line number into its equivalent line reference format.
 ///
+/// # Errors
 /// Returns `Err(EncodeError::OutOfRange)` if `line_number` is not below [`LIMIT`].
 pub fn try_encode(line_number: u16) -> Result<Encoded, EncodeError> {
 	if line_number >= LIMIT { return Err(EncodeError::OutOfRange); }
 
 	let mut r = [0b0101_0100u8, 0b0100_0000, 0b0100_0000];
-	let [ref mut a, ref mut b, ref mut c] = r;
+	let [a, b, c] = &mut r;
 
 	*b ^= ( line_number &             0b11_1111) as u8;
 	*a ^= ((line_number &           0b1100_0000) >> 2) as u8;
@@ -64,10 +69,12 @@ pub fn try_encode(line_number: u16) -> Result<Encoded, EncodeError> {
 
 
 /// Decodes a byte array into its equivalent numeric format.
+///
+/// # Errors
 pub fn try_decode(encoded: Encoded) -> Result<u16, DecodeError> {
-	let a = encoded[0] as u32;
-	let b = encoded[1] as u32;
-	let c = encoded[2] as u32;
+	let a = u32::from(encoded[0]);
+	let b = u32::from(encoded[1]);
+	let c = u32::from(encoded[2]);
 
 	let tgt = 0x4040u32
 

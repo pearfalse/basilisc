@@ -133,8 +133,11 @@ impl Prefix {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum TokenPosition {
+	/// This keyword tokenises consistently.
 	Any = 0,
+	/// This token represents a keyword when on the left-hand side of an assignment only.
 	Left = 2,
+	/// This token represents a keyword when on the right-hand side of an assignment only.
 	Right = 1,
 }
 
@@ -251,6 +254,10 @@ impl RawKeyword {
 	}
 
 	/// Returns `true` if the token uses greedy matching.
+	///
+	/// Greedy-matching tokens do not require their consituent characters to be followed by a
+	/// not-valid-for-tokens character. For example, because `AND` is greedy, it will match the
+	/// string `ANDREA`. Comparably, the string `TIMER` will not match the non-greedy token `TIME`.
 	#[inline]
 	pub fn is_greedy(&self) -> bool {
 		self.flags & flags::GREEDY != 0

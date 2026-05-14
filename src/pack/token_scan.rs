@@ -22,8 +22,7 @@ pub(super) enum Error {
 impl Error {
 	pub fn lookup(byte: u8) -> &'static ascii::AsciiStr {
 		crate::token_data::TOKEN_MAP_DIRECT.get_flat(byte as usize)
-			.map(RawKeyword::as_ascii_str)
-			.unwrap_or(Self::LOOKUP_DEFAULT)
+			.map_or(Self::LOOKUP_DEFAULT, RawKeyword::as_ascii_str)
 	}
 
 	const LOOKUP_DEFAULT: &'static ascii::AsciiStr = unsafe {
@@ -66,12 +65,14 @@ impl ElseHack {
 		TokenIter::new_direct(nonzero_ext::nonzero!(0xccu8))
 	}
 
+	#[allow(clippy::trivially_copy_pass_by_ref, reason = "highly likely to be inlined anyway")]
 	#[inline]
 	fn use_alt_else(&self) -> bool { self.stack > 0 }
 
 	fn push(&mut self) {
 		self.stack = self.stack.checked_add(1)
-			.expect("ElseHack stack overflow"); // should never happen. you can't make enough lines
+			// should never happen. you can't make enough lines
+			.unwrap_or_else(|| panic!("ElseHack stack overflow"));
 		self.on_then = false;
 	}
 
@@ -166,23 +167,23 @@ impl TokenScanner {
 		}
 
 		// line refs
-		let ch_is_digit = (b'0'..=b'9').contains(&ch);
+		let ch_is_digit = ch.is_ascii_digit();
 		match self.line_ref {
 			LineRefState::No => { } // do nothing, fall through to normal logic
-			LineRefState::Expecting { kw_byte: _ } if matches!(ch, b' ' | b'\t')
+			LineRefState::Expecting { .. } if matches!(ch, b' ' | b'\t')
 				=> { } // pass through spaces
 			LineRefState::Expecting { kw_byte } if ch_is_digit => {
 				// time to start the line ref
-				self.line_ref = LineRefState::Building { kw_byte, stage: (ch - b'0') as u16 };
+				self.line_ref = LineRefState::Building { kw_byte, stage: u16::from(ch - b'0') };
 				return Ok(()); // do nothing else with this byte
 			}
-			LineRefState::Expecting { kw_byte: _ } => {
+			LineRefState::Expecting { .. } => {
 				// some unexpected character. oh well, no line reference anymore
 				self.line_ref = LineRefState::No;
 			}
 			LineRefState::Building { kw_byte, ref mut stage } if ch_is_digit => {
-				let new_line_ref = (*stage as u32) * 10 + (ch - b'0') as u32;
-				if new_line_ref >= line_numbers::LIMIT as u32 {
+				let new_line_ref = u32::from(*stage) * 10 + u32::from(ch - b'0');
+				if new_line_ref >= u32::from(line_numbers::LIMIT) {
 					self.line_ref = LineRefState::No;
 					return Err(Error::InvalidLineRef { after: kw_byte }); // number went too high
 				}
@@ -250,16 +251,11 @@ impl TokenScanner {
 		self.char_buf.clear();
 		self.pinch = PINCH_ALL;
 
-		match self.line_ref {
-			LineRefState::No => { } // no problem
-			LineRefState::Expecting { kw_byte: _ } => {
-				// we were expecting a line reference here. oh well
-			}
-			LineRefState::Building { kw_byte, stage } => {
-				// line finished with a line ref decimal byte. ok!
-				self.push_enc_line_ref(kw_byte, stage)?;
-			}
+		if let LineRefState::Building { kw_byte, stage } = self.line_ref {
+			// line finished with a line ref decimal byte
+			self.push_enc_line_ref(kw_byte, stage)?;
 		}
+		// `No` is fine; `Expecting` is a BASIC syntax error, but not in a way that's our problem
 
 		if self.else_hack.on_then {
 			// we are in a multi-line IF, change the ELSE token
@@ -303,7 +299,7 @@ impl TokenScanner {
 			}
 
 			_ => {},
-		};
+		}
 
 		self.char_out_buf.extend(new.map(NonZeroU8::get));
 	}
@@ -315,13 +311,14 @@ impl TokenScanner {
 		// front byte first
 		while let Some((left, remain)) = self.pinch.split_first() {
 			let should_narrow_normal = left.as_ascii_str().as_bytes()
-				.get(pinch_idx).map(|&b| b < ch) != Some(false);
+				.get(pinch_idx).is_none_or(|&b| b < ch);
 
 			// skip over RHS token if there is one
 			let should_narrow_lhs = self.is_lhs && left.position() == TokenPosition::Right;
 			// if we did that, there must be a RHS one immediately after
 			debug_assert!(!should_narrow_lhs
-				|| remain.get(0).map(|kw| kw.position()) == Some(TokenPosition::Left));
+				|| remain.first().map(RawKeyword::position) == Some(TokenPosition::Left));
+
 
 			if should_narrow_normal || should_narrow_lhs {
 				// not yet narrowed down to matching substrings
@@ -334,7 +331,7 @@ impl TokenScanner {
 		// then back byte
 		while let Some((right, remain)) = self.pinch.split_last() {
 			if right.as_bytes()
-			.get(pinch_idx).map(|&b| b > ch) == Some(true) {
+			.get(pinch_idx).is_some_and(|&b| b > ch) {
 				// too flabby on the right
 				self.pinch = remain;
 			} else {
@@ -367,16 +364,16 @@ impl TokenScanner {
 			// still searching, no match yet
 			[_, ..] => {
 			},
-		};
+		}
 	}
 
 	fn commit_to(&mut self, ti: TokenIter) {
 		self.best_match = None; // forget that, we have a definite winner
-		self.set_token_buf(ti.clone());
+		let first_byte = ti.peek_first();
+		self.set_token_buf(ti);
 		self.char_buf.clear(); // all bytes accounted for
 		self.pinch = PINCH_ALL; // ready for future stuff
 
-		let first_byte = ti.peek_first();
 
 		self.is_lhs = if first_byte == ElseHack::THEN {
 			self.else_hack.on_then = true;
@@ -386,7 +383,7 @@ impl TokenScanner {
 		};
 
 		if let Some(true) = crate::token_data::TOKEN_MAP_DIRECT.get_flat(first_byte as usize)
-		.map(|k| k.triggers_line_ref()) {
+		.map(RawKeyword::triggers_line_ref) {
 			// we just pushed a line-ref-triggering keyword
 			debug_assert!(matches!(self.line_ref, LineRefState::No));
 			self.line_ref = LineRefState::Expecting { kw_byte: first_byte };
@@ -398,12 +395,10 @@ impl TokenScanner {
 			// should only commit if best match is either
 			// - greedy
 			// - nongreedy, but followed by something other than A-Z
-			let should_take = kw.is_greedy() || {
-				self.char_buf.get(kw.len().get() as usize)
-					.map(|c| !c.is_ascii_uppercase())
-					.unwrap_or(true)
-			};
-			if should_take {
+			if kw.is_greedy()
+			|| self.char_buf.get(kw.len().get() as usize)
+				.is_none_or(|c| !c.is_ascii_uppercase())
+			{
 				// take this subset of characters, use it
 				self.set_token_buf(kw.tokens());
 
@@ -421,7 +416,7 @@ impl TokenScanner {
 					},
 					_ => unreachable!("considered re-narrow with char_buf len {}; possible?",
 						self.char_buf.len()),
-				};
+				}
 				return;
 			}
 		}
@@ -433,7 +428,7 @@ impl TokenScanner {
 	}
 
 	fn flush_char_buf(&mut self) {
-		self.char_out_buf.extend(mem::take(&mut self.char_buf).into_iter());
+		self.char_out_buf.extend(mem::take(&mut self.char_buf));
 	}
 
 	fn is_keyword_char(ch: u8) -> bool {
@@ -445,7 +440,7 @@ impl TokenScanner {
 }
 
 impl Default for TokenScanner {
-	#[inline(always)]
+	#[inline]
 	fn default() -> Self {
 		Self::new()
 	}
@@ -501,6 +496,7 @@ impl fmt::Debug for TokenScanner {
 
 
 impl StringState {
+	#[allow(clippy::match_same_arms, reason = "separate comments explain why")]
 	pub(super) fn update_state(&mut self, ch: u8) {
 		if ch == b'"' {
 			*self = match *self {

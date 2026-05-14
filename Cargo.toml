@@ -5,6 +5,7 @@ members = ["crates/*"]
 version = "0.3.0"
 edition = "2021"
 authors = ["Simon Harris <simon@pearfalse.com>"]
+rust-version = "1.84.0"
 
 [workspace.dependencies]
 ascii = "1.0"
@@ -38,3 +39,29 @@ codegen-units = 1
 
 [dev-dependencies]
 assert_hex = "0.2"
+
+[lints.clippy]
+borrow_as_ptr = { level = "warn" }
+cast_lossless = { level = "warn" }
+copy_iterator = { level = "warn" }
+doc_markdown = { level = "warn" }
+elidable_lifetime_names = { level = "warn" }
+enum_glob_use = { level = "warn" }
+inline_always = { level = "warn" }
+manual_let_else = { level = "warn" }
+map_unwrap_or = { level = "warn" }
+match_same_arms = { level = "warn" }
+missing_errors_doc = { level = "warn" }
+missing_fields_in_debug = { level = "warn" }
+must_use_candidate = { level = "warn" }
+ptr_as_ptr = { level = "warn" }
+ref_as_ptr = { level = "warn" }
+semicolon_if_nothing_returned = { level = "warn" }
+separated_literal_suffix = { level = "warn" }
+single_match_else = { level = "warn" }
+uninlined_format_args = { level = "warn" }
+unnecessary_trailing_comma = { level = "warn" }
+unneeded_field_pattern = { level = "warn" }
+
+ptr_cast_constness = { level = "deny" }
+unnecessary_semicolon = { level = "deny" }

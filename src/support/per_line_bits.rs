@@ -18,7 +18,7 @@ impl fmt::Debug for PerLineBits {
 }
 
 impl PerLineBits {
-	const BYTE_COUNT: usize = (0xff00 + 7) / 8;
+	const BYTE_COUNT: usize = 0xff00usize.div_ceil(8);
 
 	/// Constructs a new object. All bits are initialised to `false`.
 	pub fn new() -> Self {
@@ -71,12 +71,12 @@ impl PerLineBits {
 	}
 
 	/// Returns an iterator over **indexes** of all set bits in the array.
-	pub fn iter_set(&self) -> IterSet {
+	pub fn iter_set(&self) -> IterSet<'_> {
 		IterSet::new(self)
 	}
 
 	/// Returns an iterator over **indexes** of all cleared bits in the array.
-	pub fn iter_clear(&self) -> IterClear {
+	pub fn iter_clear(&self) -> IterClear<'_> {
 		IterClear::new(self)
 	}
 
@@ -98,7 +98,7 @@ pub struct BitRefMut<'a> {
 	bit_mask: u8,
 }
 
-impl<'a> BitRefMut<'a> {
+impl BitRefMut<'_> {
 
 	/// Retrieves the bit value (`true` if the bit is set).
 	#[inline]
@@ -146,7 +146,7 @@ impl<'a> Iter<'a> {
 	}
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl Iterator for Iter<'_> {
 	type Item = bool;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -156,13 +156,10 @@ impl<'a> Iterator for Iter<'a> {
 		};
 
 		let r = byte & self.bit_mask != 0;
-		self.bit_mask = match self.bit_mask.checked_shl(1) {
-			Some(new_value) => new_value,
-			None => {
-				self.cur_byte = None;
-				1
-			},
-		};
+		self.bit_mask = self.bit_mask.checked_shl(1).unwrap_or_else(|| {
+			self.cur_byte = None;
+			1
+		});
 
 		Some(r)
 	}
@@ -176,9 +173,9 @@ pub struct IterFiltered<'a, const S: bool = true> {
 	bit_pos: u8,
 }
 
-impl<'a, const S: bool> fmt::Debug for IterFiltered<'a, S> {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "IterFiltered<{}>", S)?;
+impl<const S: bool> fmt::Debug for IterFiltered<'_, S> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "IterFiltered<{S}>")?;
 		f.debug_struct("")
 			.field("cur_byte", &IterFilteredPos(self))
 			.field("bit_pos", &format_args!("1<<{}", self.bit_pos))
@@ -188,10 +185,10 @@ impl<'a, const S: bool> fmt::Debug for IterFiltered<'a, S> {
 
 /// Helper struct for `IterFiltered`'s [`Debug`](std::fmt::Debug) impl.
 struct IterFilteredPos<'a, const S: bool>(&'a IterFiltered<'a, S>);
-impl<'a, const S: bool> fmt::Debug for IterFilteredPos<'a, S> {
+impl<const S: bool> fmt::Debug for IterFilteredPos<'_, S> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self.0.cur_byte {
-			Some((idx, byte)) => write!(f, "{}/{:02x}", idx, byte),
+			Some((idx, byte)) => write!(f, "{idx}/{byte:02x}"),
 			None => f.write_str("None"),
 		}
 	}
@@ -211,7 +208,6 @@ impl<'a, const S: bool> IterFiltered<'a, S> {
 		if S { 0x00 } else { 0xff }
 	}
 
-	#[inline(always)]
 	fn check_bit(byte: u8, idx: u8) -> bool {
 		if S {
 			byte & (1u8 << idx) != 0
@@ -221,7 +217,7 @@ impl<'a, const S: bool> IterFiltered<'a, S> {
 	}
 }
 
-impl<'a, const S: bool> Iterator for IterFiltered<'a, S> {
+impl<const S: bool> Iterator for IterFiltered<'_, S> {
 	type Item = u16;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -259,10 +255,14 @@ impl<'a, const S: bool> Iterator for IterFiltered<'a, S> {
 					},
 				};
 
-				if test_bit_pos.is_some() { break 'outer test_bit_pos };
+				if test_bit_pos.is_some() { break 'outer test_bit_pos }
 				if byte_done { continue 'outer; }
-			};
-		}.map(|(found_idx, found_bit)| (found_idx * 8) as u16 + found_bit as u16)
+			}
+		}.map(
+			// `found_idx` is an index of a fixed-size array whose indexes can't exceed a u16
+			#[allow(clippy::cast_possible_truncation)]
+			|(found_idx, found_bit)| (found_idx * 8) as u16 + u16::from(found_bit)
+		)
 	}
 }
 

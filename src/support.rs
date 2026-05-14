@@ -17,13 +17,22 @@ pub type IoObject<'a> = &'a mut (dyn Readable + 'a);
 
 /// A trait for easily fetching data from an I/O source, one byte at a time.
 ///
-/// It is automatically implemented on [`dyn io::Read`](io::Read);
+/// It is automatically implemented on [`dyn io::Read`](io::Read).
 pub trait NextByte {
+	/// Type for any read errors that may occur.
+	///
+	/// In practice, this will either be [`io::Error`] or [`Infallible`].
 	type Error;
+
+	/// Returns another byte from the source.
+	///
+	/// # Errors
+	///
+	/// Will return `Err(Self::Error)` in the case of any read errors.
 	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error>;
 }
 
-impl<'a> NextByte for dyn io::Read + 'a {
+impl NextByte for dyn io::Read {
 	type Error = io::Error;
 
 	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
@@ -31,7 +40,7 @@ impl<'a> NextByte for dyn io::Read + 'a {
 	}
 }
 
-impl<'a, 'b> NextByte for &'a mut (dyn io::Read + 'b) {
+impl NextByte for &mut dyn io::Read {
 	type Error = io::Error;
 
 	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
@@ -48,7 +57,7 @@ fn next_byte_io_read<I: io::Read + ?Sized>(src: &mut I) -> Result<Option<u8>, io
 	}
 }
 
-impl<'a> NextByte for std::slice::Iter<'a, u8> {
+impl NextByte for std::slice::Iter<'_, u8> {
 	type Error = Infallible;
 
 	fn next_byte(&mut self) -> Result<Option<u8>, Self::Error> {
@@ -59,7 +68,7 @@ impl<'a> NextByte for std::slice::Iter<'a, u8> {
 
 pub(crate) struct HexArray<'a>(pub &'a [u8]);
 
-impl<'a> fmt::Debug for HexArray<'a> {
+impl fmt::Debug for HexArray<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		f.write_char('[')?;
 		let mut show_comma = false;
@@ -68,13 +77,13 @@ impl<'a> fmt::Debug for HexArray<'a> {
 				f.write_str(", ")?;
 			}
 			show_comma = true;
-			write!(f, "{:02x}", b)?;
+			write!(f, "{b:02x}")?;
 		}
 		f.write_char(']')
 	}
 }
 
-impl<'a> fmt::Display for HexArray<'a> {
+impl fmt::Display for HexArray<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		<Self as fmt::Debug>::fmt(self, f)
 	}

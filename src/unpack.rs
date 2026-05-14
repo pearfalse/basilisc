@@ -27,6 +27,7 @@ pub struct Line {
 
 impl Line {
 	/// Constructs a new line from its constituent parts.
+	#[must_use]
 	pub fn new(line_number: u16, data: Box<[u8]>) -> Self {
 		Self { line_number, data }
 	}
@@ -62,6 +63,7 @@ pub struct Error {
 
 impl Error {
 	/// The (logical) line number at which the error occurred.
+	#[must_use]
 	pub fn line_number(&self) -> Option<u16> {
 		if self.line_number < crate::line_numbers::LIMIT {
 			Some(self.line_number)
@@ -109,6 +111,7 @@ impl From<Infallible> for ErrorKind {
 }
 
 impl PartialEq for ErrorKind {
+	#[allow(clippy::enum_glob_use, clippy::match_same_arms, reason = "readability")]
 	fn eq(&self, other: &Self) -> bool {
 		use ErrorKind::*;
 		match (self, other) {
@@ -197,6 +200,7 @@ where I: NextByte, ErrorKind: From<<I as NextByte>::Error> {
 	/// A return value of `Ok(None)` indicates that the intended EOF marker has been found. Upon
 	/// encountering this marker, further calls to this method will return `Ok(None)` without
 	/// attempting to read more bytes from the inner stream.
+	#[allow(clippy::missing_errors_doc, reason = "error causes are generally known")]
 	pub fn next_line(&mut self) -> Result<Option<Line>> {
 		self.buffer.clear();
 		self.line_state = LineState::HaveNothing;
@@ -269,7 +273,7 @@ where I: NextByte, ErrorKind: From<<I as NextByte>::Error> {
 				},
 				LineState::HaveHalfLineNumber(lh) => match nb {
 					Some(ll) => {
-						let lf = ((lh as u16) << 8) + (ll as u16);
+						let lf = (u16::from(lh) << 8) + u16::from(ll);
 						self.line_state = LineState::HaveFullLineNumber(lf);
 						continue;
 					},
@@ -363,35 +367,29 @@ where I: NextByte, ErrorKind: From<<I as NextByte>::Error> {
 		};
 
 		// try lookup and conversion to token
-		match decode_map.get_flat(next_byte as usize) {
-			Some(s) => {
-				let should_insert_space = if ! s.is_greedy() {
-					// if next byte is also a token char, or token, insert a space
-					// this undoes an optimisation by BASIC squashers that would destroy the
-					// program syntax on a plaintext roundtrip
-					// TODO: check if this is right
-					self.inner.peek().map(|b| b >= 0x7f || b.is_ascii_alphabetic()) == Some(true)
-				} else { false };
-				self.cur_token = KeywordIter2::new(s.iter(), should_insert_space);
-			},
-			None => {
-				// no match
-				debug_assert!(self.byte_flush.is_empty());
-				if let Some(b) = byte_if_fail {
-					self.byte_flush.push(b);
-				}
-				self.byte_flush.push(next_byte);
+		if let Some(s) = decode_map.get_flat(next_byte as usize) {
+			let should_insert_space = !s.is_greedy() &&
+				// if next byte is also a token char, or token, insert a space
+				// this undoes an optimisation by BASIC squashers that would destroy the
+				// program syntax on a plaintext roundtrip
+				// TODO: check if this is right
+				self.inner.peek().is_some_and(|b| b >= 0x7f || b.is_ascii_alphabetic())
+				;
+			self.cur_token = KeywordIter2::new(s.iter(), should_insert_space);
+		} else {
+			// no match
+			debug_assert!(self.byte_flush.is_empty());
+			if let Some(b) = byte_if_fail {
+				self.byte_flush.push(b);
 			}
-		};
+			self.byte_flush.push(next_byte);
+		}
 
 		None // no ASCII byte to pass through
 	}
 
 	fn update_line_ref(&mut self, next_byte: u8) -> KindResult<bool> {
-		let ref_stage = match self.line_ref {
-			Some(ref mut stage) => stage,
-			None => return Ok(false)
-		};
+		let Some(ref_stage) = &mut self.line_ref else { return Ok(false) };
 
 		match **ref_stage {
 			[a, b] => {
@@ -413,14 +411,14 @@ where I: NextByte, ErrorKind: From<<I as NextByte>::Error> {
 				self.line_ref = None;
 			},
 			_ => ref_stage.push(next_byte),
-		};
+		}
 
 		Ok(true)
 	}
 }
 
 
-/// A reimplementation of [std::iter::Peekable] for types that implement [`NextByte`].
+/// A reimplementation of [`std::iter::Peekable`] for types that implement [`NextByte`].
 ///
 /// [`Peekable::peek`] differs from the stdlib implementation in two ways:
 ///
@@ -460,10 +458,10 @@ impl<I: NextByte> fmt::Debug for Peekable<I> {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		struct NextFormat<'a, I: NextByte>(&'a std::result::Result<Option<u8>, <I as NextByte>::Error>);
 
-		impl<'a, I: NextByte> fmt::Debug for NextFormat<'a, I> {
+		impl<I: NextByte> fmt::Debug for NextFormat<'_, I> {
 			fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 				match *self.0 {
-					Ok(Some(b)) => write!(f, "byte({:02x})", b),
+					Ok(Some(b)) => write!(f, "byte({b:02x})"),
 					Ok(None) => f.write_str("None"),
 					Err(_) => f.write_str("Err(_)"),
 				}
@@ -476,7 +474,7 @@ impl<I: NextByte> fmt::Debug for Peekable<I> {
 	}
 }
 
-/// The KeywordIter we all know and love, but with the possibility of yielding a space (U+0020)
+/// The `KeywordIter` we all know and love, but with the possibility of yielding a space (U+0020)
 /// immediately afterwards.
 #[derive(Debug, Clone)]
 struct KeywordIter2<'a> {
@@ -493,7 +491,7 @@ impl<'a> KeywordIter2<'a> {
 	}
 }
 
-impl<'a> Default for KeywordIter2<'a> {
+impl Default for KeywordIter2<'_> {
 	fn default() -> Self {
 		Self {
 			keyword_iter: keyword::Iter::empty(),

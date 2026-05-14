@@ -74,7 +74,7 @@ impl<'a> ByteDecoder<'a> {
 
 		ch.as_risc_os_latin1()
 			.map(Option::Some)
-			.ok_or_else(|| ErrorKind::NoLatin1Char(ch))
+			.ok_or(ErrorKind::NoLatin1Char(ch))
 	}
 
 
@@ -84,10 +84,7 @@ impl<'a> ByteDecoder<'a> {
 
 	fn try_next_char(&mut self) -> Result<Option<char>, ErrorKind> {
 		let slice = unsafe { &*self.drain };
-		let lead = match slice.first().copied() {
-			Some(c) => c,
-			None => return Ok(None),
-		};
+		let Some(&lead) = slice.first() else { return Ok(None) };
 
 		let char8_len = match lead {
 			0x00..=0x7f => 1u8, // ASCII
@@ -105,11 +102,11 @@ impl<'a> ByteDecoder<'a> {
 			return Ok(None);
 		};
 
-		self.drain = &slice[(char8_len as usize)..] as *const [u8];
+		self.drain = &raw const slice[(char8_len as usize)..];
 		std::str::from_utf8(char8_slice)
 			.map_err(|_| ErrorKind::InvalidUtf8 { start_pos: self.last_read_pos })
 			.map(|s| {
-				self.last_read_pos += char8_len as u64;
+				self.last_read_pos += u64::from(char8_len);
 				Some(s.chars().next().unwrap())
 			})
 	}
@@ -123,12 +120,12 @@ impl<'a> ByteDecoder<'a> {
 			if rem_len > 0 {
 				// move undrained elements to the front and offset `entire_buf`
 				ptr::copy(
-					self.drain as *const u8,
-					self.buf as *mut u8,
+					self.drain.cast::<u8>(),
+					self.buf.cast::<u8>(),
 					rem_len);
 				let space_len = self.buf.len() - rem_len;
 				ptr::slice_from_raw_parts_mut(
-					(self.buf as *mut u8).add(rem_len),
+					self.buf.cast::<u8>().add(rem_len),
 					space_len)
 			} else {
 				self.buf
@@ -155,17 +152,17 @@ impl<'a> ByteDecoder<'a> {
 		})
 	}
 
-	#[inline(always)]
+	#[inline]
 	fn drain_len(&self) -> usize {
 		self.drain.len()
 	}
 }
 
-impl<'a> Drop for ByteDecoder<'a> {
+impl Drop for ByteDecoder<'_> {
 	fn drop(&mut self) {
 		unsafe {
 			// SAFETY: `buf` was always a boxed slice, and we're not touching `self.drain` anymore
-			std::mem::drop(Box::from_raw(self.buf))
+			std::mem::drop(Box::from_raw(self.buf));
 		}
 	}
 }

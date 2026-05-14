@@ -1,26 +1,26 @@
 //! Container module for additional features added to `ArrayVec`.
 //!
-//! See [ArrayVecExt] for more.
+//! See [`ArrayVecExt`] for more.
 
 use std::{mem::{ManuallyDrop, self, MaybeUninit}, ptr};
 use arrayvec::ArrayVec;
 
-/// Extension trait for additional batch-removing methods needed on ArrayVec.
+/// Extension trait for additional batch-removing methods needed on `ArrayVec`.
 ///
 /// While only useful in practice on an element type of `u8`, this trait supports any arbitrary
 /// type, including those that do not implement [`Copy`].
 ///
 /// [rust_Copy]: https://doc.rust-lang.org/std/marker/trait.Copy.html
 pub(crate) trait ArrayVecExt<T> {
-	/// Pops the first element from the front of the ArrayVec, shifting all others forward one
+	/// Pops the first element from the front of the `ArrayVec`, shifting all others forward one
 	/// position.
 	fn pop_front(&mut self) -> Option<T>;
 
-	/// Removes the first `x` items from the front of the ArrayVec.
+	/// Removes the first `x` items from the front of the `ArrayVec`.
 	///
 	/// # Panics
 	///
-	/// Panics if `x` exceeds the ArrayVec's length, or if any removed item's `Drop` implementation
+	/// Panics if `x` exceeds the `ArrayVec`'s length, or if any removed item's `Drop` implementation
 	/// panics (which may cause other items to leak).
 	fn remove_first(&mut self, x: usize);
 }
@@ -31,13 +31,16 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 
 		// keep a non-drop copy of the element to pop
 		let ret = ManuallyDrop::new(unsafe {
-			ptr::read(self.first()? as *const T)
+			// SAFETY: we know self contains at least one element
+			self.as_ptr().read()
 		});
 
 		// reduce the length by 1, then move all items up one place
 		unsafe {
+			// SAFETY: all copies occur within the bounds of the ArrayVec allocation
 			let dst = self.as_mut_ptr();
-			let src = (dst as *const T).add(1);
+			let src = dst.cast_const().add(1);
+			// this is very much an overlapping copy
 			ptr::copy(src, dst, new_len);
 			self.set_len(new_len);
 		}
@@ -50,8 +53,7 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 
 		let old_len = self.len();
 		let new_len = old_len.checked_sub(x)
-			.unwrap_or_else(|| panic!("couldn't remove {} items from a {}-wide ArrayVec",
-				x, old_len));
+			.unwrap_or_else(|| panic!("couldn't remove {x} items from a {old_len}-wide ArrayVec"));
 
 		let mut drop_sites = unsafe {
 			// this is MaybeUninit::uninit_array, but usable on stable
@@ -61,7 +63,8 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 			// copy items to here for dropping later
 			unsafe {
 				// we go through a raw slice to keep miri happy
-				let dst = ptr::slice_from_raw_parts_mut(drop_sites.as_mut_ptr(), x) as *mut T;
+				// FIXME: miri might be better at understanding this now
+				let dst = ptr::slice_from_raw_parts_mut(drop_sites.as_mut_ptr(), x).cast::<T>();
 				ptr::copy_nonoverlapping(self.as_ptr(), dst, x);
 			}
 		}
@@ -71,7 +74,7 @@ impl<T, const N: usize> ArrayVecExt<T> for ArrayVec<T, N> {
 			// pre-declare src and dst pointers to keep miri happy (it seems to dislike fetching
 			// two pointers inline due to the side-by-side method calls to `&self` and `&mut self`)
 			let dst = self.as_mut_ptr();
-			let src = (dst as *const T).add(x);
+			let src = dst.cast_const().add(x);
 			ptr::copy(src, dst, new_len);
 			self.set_len(new_len);
 		}

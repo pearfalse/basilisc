@@ -75,6 +75,7 @@ impl Error {
 	/// Returns the line number that this error occurred on, if known.
 	///
 	/// Keep in mind that this is the 1-indexed line of the _text_ file, _not_ the BASIC line number.
+	#[must_use]
 	pub fn line_number(&self) -> Option<u32> {
 		Some(self.line_number).filter(|&n| n != u32::MAX)
 	}
@@ -114,6 +115,7 @@ impl From<token_scan::Error> for ErrorKind {
 }
 
 impl PartialEq for ErrorKind {
+	#[allow(clippy::enum_glob_use)]
 	fn eq(&self, other: &Self) -> bool {
 		use ErrorKind::*;
 		match (self, other) {
@@ -152,6 +154,7 @@ pub struct Line {
 }
 
 impl Line {
+	#[allow(clippy::missing_errors_doc, reason = "return type makes it obvious")]
 	/// Writes the serialised form of this line to the given I/O object.
 	pub fn write(&self, target: &mut dyn io::Write) -> io::Result<()> {
 		debug_assert!(self.contents.len() <= MAX_LINE_LEN);
@@ -202,14 +205,17 @@ impl<'a> Parser<'a> {
 	/// Attempts to read and conver the next line of the file.
 	///
 	/// Upon success, returns whether the parser expects there to be more lines to convert.
+	///
+	/// # Errors
+	/// Returns an error if the next line fails to parse correctly, or if an I/O error occurs.
 	pub fn next_line(&mut self) -> Result<bool> {
 		// we need early return for fuse behaviour
 		if self.is_eof { return Ok(false); }
 
-		if self.lines.len() == LINE_NUMBER_CAP as usize {
+		if self.lines.len() == usize::from(LINE_NUMBER_CAP) {
 			// cannot add more lines, no way no how
 			return Err(Error {
-				line_number: LINE_NUMBER_CAP as u32,
+				line_number: u32::from(LINE_NUMBER_CAP),
 				kind: ErrorKind::TooManyLines,
 			});
 		}
@@ -252,13 +258,13 @@ impl<'a> Parser<'a> {
 					break
 				}, // end of line
 				_ => {},
-			};
+			}
 			match state {
 				LineParser::BeforeLineNumber => match byte {
 					b' ' | b'\t' => {},
 					b'0'..=b'9' => {
 						// make digits, add to digit
-						state = LineParser::ParsingLineNumber { stage: (byte - b'0') as u16 };
+						state = LineParser::ParsingLineNumber { stage: u16::from(byte - b'0') };
 						continue;
 					},
 					other => {
@@ -269,7 +275,7 @@ impl<'a> Parser<'a> {
 				},
 				LineParser::ParsingLineNumber { ref mut stage } => match byte {
 					b'0'..=b'9' => {
-						let new = ((*stage) as u32) * 10 + (byte - b'0') as u32;
+						let new = u32::from(*stage) * 10 + u32::from(byte - b'0');
 						*stage = u16::try_from(new).ok()
 							.filter(|&ln| ln < LINE_NUMBER_CAP)
 							.ok_or(ErrorKind::LineNumberOutOfRange { found: new })
@@ -280,10 +286,10 @@ impl<'a> Parser<'a> {
 						self.update_body(other).map_err(wrap_error)?;
 					},
 				},
-				LineParser::InLineBody { line_number: _ } => {
-					self.update_body(byte).map_err(wrap_error)?
+				LineParser::InLineBody { .. } => {
+					self.update_body(byte).map_err(wrap_error)?;
 				},
-			};
+			}
 		}
 
 		self.flush_token_scanner().map_err(wrap_error)?;
@@ -342,9 +348,8 @@ impl<'a> Parser<'a> {
 						Prefix::C7 => &crate::token_data::TOKEN_MAP_C7,
 						Prefix::C8 => &crate::token_data::TOKEN_MAP_C8,
 					};
-					last_token_was_nongreedy =
-						lookup.get_flat(maybe_tok as usize).map(RawKeyword::is_greedy)
-						== Some(false);
+					last_token_was_nongreedy = lookup.get_flat(maybe_tok as usize)
+						.is_some_and(|x| !RawKeyword::is_greedy(x));
 				}
 			}
 
@@ -371,12 +376,17 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Writes the converted BASIC file to the given I/O object.
+	///
+	/// # Errors
+	/// - Will return `TooManyUnnumberedLines` if there's no room to add line numbers within
+	///   the given constraints.
+	/// - Will return `IoError` if there is an I/O error when writing bytes.
 	pub fn write(self, target: &mut dyn io::Write, line_increment: Option<u16>) -> Result<()> {
 		let lines = self.into_lines(line_increment)?;
 
 		let ln = std::cell::Cell::new(0u32);
 		let wrap_error = |ioe| Error {
-			line_number: ln.get() as u32,
+			line_number: ln.get(),
 			kind: ErrorKind::IoError(ioe)
 		};
 
@@ -401,9 +411,8 @@ impl<'a> Parser<'a> {
 		}
 
 		Ok(self.lines.into_iter().enumerate().map(|(idx, ul)| {
-			let line_number = match ul.line_number {
-				Some(ln) => ln,
-				None => panic!("No line number for line at index {}", idx),
+			let Some(line_number) = ul.line_number else {
+				panic!("No line number for line at index {idx}")
 			};
 
 			Line { line_number, contents: ul.contents }
@@ -429,8 +438,7 @@ impl<'a> Parser<'a> {
 			move || ErrorKind::LineTooLong {
 				length: match old_buf_len.saturating_add(add_len) {
 					fits if fits < u16::MAX => fits, // ???
-					too_big => panic!("tried to create line length {}, which is impossibly large",
-						too_big),
+					too_big => panic!("tried to create line length {too_big}, which is impossibly large"),
 				},
 			}
 		};
@@ -673,7 +681,7 @@ mod test_line_write {
 }
 
 /// A generative iterator for inferred line numbers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Range {
 	pub start: u16,
 	pub step: NonZeroU16,
@@ -758,7 +766,7 @@ fn infer_line_number_range(line_before: Option<u16>, line_after: Option<u16>, nu
 	Err(Error {
 		line_number: u32::MAX,
 		kind: ErrorKind::TooManyUnnumberedLines {
-			max_possible: line_after - line_before.map(|lb| lb + 1).unwrap_or(0),
+			max_possible: line_after - line_before.map_or(0, |lb| lb + 1),
 			needed: num_lines.into(),
 		}
 	})

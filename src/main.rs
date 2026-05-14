@@ -109,9 +109,9 @@ impl UnpackLineNumbersOption {
 
 impl Command {
 	fn user_wants_help(&self) -> bool {
-		match *self {
-			Command::Pack(ref c) if c.help => true,
-			Command::Unpack(ref c) if c.help => true,
+		match self {
+			Command::Pack(c) if c.help => true,
+			Command::Unpack(c) if c.help => true,
 			_ => false,
 		}
 	}
@@ -119,8 +119,8 @@ impl Command {
 	fn print_usage_and_exit(process_name: &str, command_name: Option<&'static str>) -> ! {
 		let to_print = command_name.and_then(Command::command_usage)
 			.unwrap_or_else(Command::usage);
-		eprintln!("{}", to_print);
-		eprintln!("\nRun '{} `subcommand` --help' for more guidance", process_name);
+		eprintln!("{to_print}");
+		eprintln!("\nRun '{process_name} `subcommand` --help' for more guidance");
 		std::process::exit(ExitCode::Success.into());
 	}
 }
@@ -153,20 +153,18 @@ impl HelpExt for str {}
 fn main() {
 	let (process, args_str) = {
 		let mut iter = std::env::args();
-		let process = iter.next().map(Cow::Owned).unwrap_or(
-			Cow::Borrowed(env!("CARGO_PKG_NAME"))
-		);
+		let process = iter.next().map_or(Cow::Borrowed(env!("CARGO_PKG_NAME")), Cow::Owned);
 		(process, iter.collect::<Vec<_>>())
 	};
-	if matches!(*args_str, [ref s] if s.is_help()) {
+	if matches!(&*args_str, [s] if s.is_help()) {
 		Command::print_usage_and_exit(&process, None);
 	}
 	let args = match Command::parse_args_default(&args_str) {
 		Ok(a) if a.user_wants_help() => Command::print_usage_and_exit(&process, a.command_name()),
 		Ok(a) => a,
 		Err(e) => {
-			eprintln!("argument error: {}", e);
-			eprintln!("run `{} help` for usage guidelines", process);
+			eprintln!("argument error: {e}");
+			eprintln!("run `{process} help` for usage guidelines");
 			std::process::exit(ExitCode::CliArgError.into());
 		}
 	};
@@ -175,17 +173,18 @@ fn main() {
 	let mut pack_error: Option<PackError> = None;
 
 	let result : Result<(), (&dyn Error, ExitCode)> = match args {
-		Command::Unpack(args) => run_unpack(args).map_err(|e| {
+		Command::Unpack(args) => run_unpack(&args).map_err(|e| {
 			let exit_code = match e {
-				UnpackError::Forwarded(unpack::Error { kind: unpack::ErrorKind::UnexpectedEof, .. })
-				| UnpackError::Forwarded(unpack::Error { kind: unpack::ErrorKind::IoError(_), .. })
+				UnpackError::Forwarded(unpack::Error {
+					kind: unpack::ErrorKind::UnexpectedEof | unpack::ErrorKind::IoError(_), ..
+				})
 					=> ExitCode::IoError,
 				_ => ExitCode::InvalidData,
 			};
 
 			(unpack_error.insert(e) as &dyn Error, exit_code)
 		}),
-		Command::Pack(args) => run_pack(args).map_err(|e| {
+		Command::Pack(args) => run_pack(&args).map_err(|e| {
 			let exit_code = match e {
 				PackError { kind: pack::ErrorKind::IoError(_), .. }
 					=> ExitCode::IoError,
@@ -202,12 +201,12 @@ fn main() {
 	};
 
 	std::process::exit(if let Err((e, code)) = result {
-		eprintln!("error: {}", e);
+		eprintln!("error: {e}");
 		code.into()
 	} else { ExitCode::Success.into() });
 }
 
-fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
+fn run_unpack(args: &UnpackArgs) -> Result<(), UnpackError> {
 	use crate::latin1::CharExt;
 
 	let stdin;
@@ -218,6 +217,7 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 	let mut input_file;
 	let mut output_file;
 
+	#[allow(clippy::items_after_statements)]
 	fn wrap_io_error(ioe: io::Error) -> UnpackError {
 		UnpackError::from(unpack::ErrorKind::IoError(ioe))
 	}
@@ -274,7 +274,7 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 				=> output.write_all(&[32u8; 6][..]).map_err(wrap_io_error)?,
 
 			_ => {},
-		};
+		}
 
 		let mut utf8_buf = [0u8; 4];
 		for latin1_byte in line.data.iter().copied() {
@@ -290,7 +290,7 @@ fn run_unpack(args: UnpackArgs) -> Result<(), UnpackError> {
 	output.flush().map_err(wrap_io_error)
 }
 
-fn run_pack(args: PackArgs) -> Result<(), PackError> {
+fn run_pack(args: &PackArgs) -> Result<(), PackError> {
 	let stdin;
 	let stdout;
 
@@ -300,33 +300,28 @@ fn run_pack(args: PackArgs) -> Result<(), PackError> {
 	let mut input_file;
 	let mut output_file;
 
-	let output: &mut dyn io::Write = match &*args.output_file {
-		"-" => {
-			stdout = io::stdout();
-			stdout_lock = stdout.lock();
-			&mut stdout_lock
-		},
-		path => {
-			output_file = fs::File::options()
-				.write(true)
-				.create(true)
-				.truncate(true)
-				.open(path)
-				.inspect_err(|_| eprintln!("Failed to open output file"))?;
-			&mut output_file
-		},
+	let output: &mut dyn io::Write = if args.output_file == "-" {
+		stdout = io::stdout();
+		stdout_lock = stdout.lock();
+		&mut stdout_lock
+	} else {
+		output_file = fs::File::options()
+			.write(true)
+			.create(true)
+			.truncate(true)
+			.open(&args.output_file)
+			.inspect_err(|_| eprintln!("Failed to open output file"))?;
+		&mut output_file
 	};
 
-	let input: IoObject<'_> = match &*args.input_file {
-		"-" => {
-			stdin = io::stdin();
-			stdin_lock = stdin.lock();
-			&mut stdin_lock
-		},
-		path => {
-			input_file = BufReader::new(fs::File::open(path).inspect_err(|_| eprintln!("Failed to open input file"))?);
-			&mut input_file
-		},
+	let input: IoObject<'_> = if args.input_file == "-" {
+		stdin = io::stdin();
+		stdin_lock = stdin.lock();
+		&mut stdin_lock
+	} else {
+		input_file = BufReader::new(fs::File::open(&args.input_file)
+			.inspect_err(|_| eprintln!("Failed to open input file"))?);
+		&mut input_file
 	};
 
 	let mut parser = pack::Parser::new(input);

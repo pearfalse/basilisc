@@ -104,7 +104,7 @@ fn write_parse_map(file: &mut fs::File, maps: &[&'static TokenMapData]) -> io::R
 	let mut list: Vec<&'static Keyword>
 	= Vec::with_capacity(maps.iter().map(|tm| tm.keywords().len()).sum());
 
-	for map in maps.iter().copied() {
+	for map in maps {
 		list.extend(map.keywords());
 	}
 

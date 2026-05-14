@@ -34,9 +34,14 @@ impl TokenIter {
 		}
 	}
 
+	/// Returns `true` if this iterator is empty.
+	pub fn is_empty(&self) -> bool {
+		self.a.is_none()
+	}
+
 	/// Peeks the next byte that this iterator will yield.
 	pub fn peek_first(&self) -> u8 {
-		self.a.map(NonZeroU8::get).unwrap_or(0)
+		self.a.map_or(0, NonZeroU8::get)
 	}
 }
 

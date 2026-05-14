@@ -38,7 +38,7 @@ impl<'a> FindGaps<'a> {
 
 	fn sp_addr(&self, addr: &UnnumberedLine) -> *mut UnnumberedLine {
 		#![allow(unstable_name_collisions)]
-		self.start.with_addr((addr as *const UnnumberedLine).addr())
+		self.start.with_addr(std::ptr::from_ref(addr).addr())
 	}
 }
 
@@ -46,14 +46,12 @@ impl<'a> Iterator for FindGaps<'a> {
 	type Item = Gap<'a>;
 
 	fn next(&mut self) -> Option<Self::Item> {
-		use std::ptr;
-
 		let mut search = unsafe {
 			// SAFETY: `self.start` and `self.end` are always valid edges of a half-open range
 			// encompassing the original `&'a mut [UnnumberedLine]`
 			//
 			// shared borrow starts here; to be split before &mut refs
-			&*ptr::slice_from_raw_parts(self.start,
+			std::slice::from_raw_parts(self.start,
 				self.end.offset_from(self.start) as usize)
 		};
 		let (before, slice_start) = loop {
