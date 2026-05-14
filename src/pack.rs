@@ -190,6 +190,12 @@ pub struct Parser<'a> {
 	is_eof: bool,
 }
 
+#[derive(Debug)]
+enum LineStatus {
+	Line { number: Option<u16> },
+	Blank,
+}
+
 impl<'a> Parser<'a> {
 	/// Constructs a new parser.
 	pub fn new(src: IoObject<'a>) -> Self {
@@ -220,19 +226,23 @@ impl<'a> Parser<'a> {
 			});
 		}
 
-		if let Some(maybe_ln) = self.raw_line()? {
+		if let LineStatus::Line { number } = self.raw_line()? {
 			self.lines.push(UnnumberedLine {
-				line_number: maybe_ln,
+				line_number: number,
 				contents: (&**self.buf).into(),
 			});
-		} else {
-			self.is_eof = true;
+		} else if !self.is_eof {
+			// push an empty line
+			self.lines.push(UnnumberedLine {
+				line_number: None,
+				contents: Vec::new().into_boxed_slice(),
+			});
 		}
 		Ok(!self.is_eof)
 	}
 
 	// TODO: replace Option<Option<_>>
-	fn raw_line(&mut self) -> Result<Option<Option<u16>>> {
+	fn raw_line(&mut self) -> Result<LineStatus> {
 		#[derive(Debug)]
 		enum LineParser {
 			BeforeLineNumber,
@@ -295,7 +305,7 @@ impl<'a> Parser<'a> {
 		self.flush_token_scanner().map_err(wrap_error)?;
 
 		let final_line_number = match state {
-			LineParser::BeforeLineNumber => return Ok(None),
+			LineParser::BeforeLineNumber => return Ok(LineStatus::Blank),
 			LineParser::ParsingLineNumber { stage } => Some(stage),
 			LineParser::InLineBody { line_number } => line_number,
 		};
@@ -312,7 +322,7 @@ impl<'a> Parser<'a> {
 			}
 		}
 
-		Ok(Some(final_line_number))
+		Ok(LineStatus::Line { number: final_line_number })
 	}
 
 	fn last_ditch_remove_all_nongreedy_spaces(&mut self) {
@@ -609,6 +619,11 @@ mod test_parser {
 		assert!(input.len() > MAX_LINE_LEN, "test is inconclusive");
 
 		expect_success(&input, &[(10, &expect)], true);
+	}
+
+	#[test]
+	fn preserve_blank_lines() {
+		expect_success(b"One\n\nThree", &[(10, b"One"), (20, b""), (30, b"Three")], true);
 	}
 
 	fn expect_success(input: &[u8], output: &[(u16, &[u8])], set_numbers: bool) {
