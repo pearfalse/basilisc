@@ -13,7 +13,6 @@ arrayvec = "0.7"
 thiserror = "1.0"
 static_assertions = "1.1"
 nonzero_ext = "0.3"
-sptr = ">= 0.3"
 
 [package]
 name = "basilisc"
@@ -27,7 +26,6 @@ arrayvec = { workspace = true }
 thiserror = { workspace = true }
 static_assertions = { workspace = true }
 nonzero_ext = { workspace = true }
-sptr = { workspace = true }
 
 basilisc-base = { path = "crates/basilisc-base" }
 

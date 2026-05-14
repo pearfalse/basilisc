@@ -2,9 +2,6 @@
 
 use std::marker::PhantomData;
 
-#[allow(unused_imports)]
-use sptr::Strict;
-
 use super::UnnumberedLine;
 
 /// Encloses a mutable slice of lines with no line number, as well as contextual info about
@@ -37,7 +34,6 @@ impl<'a> FindGaps<'a> {
 	}
 
 	fn sp_addr(&self, addr: &UnnumberedLine) -> *mut UnnumberedLine {
-		#![allow(unstable_name_collisions)]
 		self.start.with_addr(std::ptr::from_ref(addr).addr())
 	}
 }
