@@ -46,7 +46,8 @@ struct PackArgs {
 
 	#[options(help = "request an increment amount for automatic line numbers",
 		meta = "<integer above zero>",
-		long = "increment", no_short)]
+		long = "increment",
+		short = 'L')]
 	line_number_increment: Option<u16>,
 
 	#[options(help = "show help for this command")]
@@ -65,7 +66,7 @@ struct UnpackArgs {
 
 	#[options(help = "use of line numbers in output",
 		default = "minimal",
-		no_short,
+		short = 'L',
 		meta = "minimal/always/forbid",
 		parse(try_from_str = "UnpackLineNumbersOption::try_parse"),
 		)]
