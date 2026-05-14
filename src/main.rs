@@ -94,7 +94,7 @@ impl<E> From<E> for UnpackError
 where unpack::ErrorKind: From<E> {
 	#[inline]
 	fn from(e: E) -> Self {
-		UnpackError::Forwarded(unpack::Error::wrap_without_line_number(e.into()))
+		UnpackError::Forwarded(unpack::Error::wrap_without_line_number(e))
 	}
 }
 

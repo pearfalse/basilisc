@@ -488,8 +488,11 @@ impl fmt::Debug for TokenScanner {
 			.field("char_buf", &HexArray(&self.char_buf))
 			.field("char_out_buf", &&*self.char_out_buf)
 			.field("best_match", &self.best_match)
-			.field("else_hack", &self.else_hack)
 			.field("pinch", &PinchDebug::new(self))
+			.field("is_lhs", &self.is_lhs)
+			.field("else_hack", &self.else_hack)
+			.field("line_ref", &self.line_ref)
+			.field("string_state", &self.string_state)
 			.finish()
 	}
 }
